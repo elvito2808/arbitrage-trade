@@ -33,8 +33,17 @@ class KuCoinAdapter:
         try:
             with urlopen(request, timeout=self.timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise AdapterError(f"KuCoin public market request failed: {type(exc).__name__}") from exc
+        except (
+            HTTPError,
+            URLError,
+            TimeoutError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise AdapterError(
+                f"KuCoin public market request failed: {type(exc).__name__}"
+            ) from exc
 
         if not isinstance(payload, dict) or payload.get("code") != "200000":
             code = payload.get("code") if isinstance(payload, dict) else None
