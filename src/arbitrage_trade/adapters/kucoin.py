@@ -2,12 +2,11 @@
 
 import json
 from urllib.error import HTTPError, URLError
-
-from ..resilience import TransientHTTPError, retry_call
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from ..core import MarketQuote
+from ..resilience import TransientHTTPError, retry_call
 
 
 class AdapterError(RuntimeError):
@@ -18,7 +17,12 @@ class KuCoinAdapter:
     name = "kucoin"
     BASE_URL = "https://api.kucoin.com"
 
-    def __init__(self, timeout: float = 10.0, retry_attempts: int = 3, retry_base_delay: float = 0.1) -> None:
+    def __init__(
+        self,
+        timeout: float = 10.0,
+        retry_attempts: int = 3,
+        retry_base_delay: float = 0.1,
+    ) -> None:
         if timeout <= 0:
             raise ValueError("timeout must be positive")
         if retry_attempts < 1 or retry_base_delay < 0:

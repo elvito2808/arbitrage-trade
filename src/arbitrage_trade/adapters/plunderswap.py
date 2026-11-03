@@ -13,11 +13,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
-
-from ..resilience import TransientHTTPError, retry_call
 from urllib.request import Request, urlopen
 
 from ..core import SwapQuote
+from ..resilience import TransientHTTPError, retry_call
 
 
 class AdapterNotConfigured(RuntimeError):
