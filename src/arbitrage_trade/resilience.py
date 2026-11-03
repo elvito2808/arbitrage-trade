@@ -67,8 +67,10 @@ def configure_logging(
                 if isinstance(item, logging.StreamHandler)
                 and any(isinstance(filter_, RedactingFilter) for filter_ in item.filters)
             ),
-            logging.StreamHandler(),
+            None,
         )
+        if configured_handler is None:
+            configured_handler = logging.StreamHandler()
     else:
         configured_handler = handler
     if not any(isinstance(item, RedactingFilter) for item in configured_handler.filters):
