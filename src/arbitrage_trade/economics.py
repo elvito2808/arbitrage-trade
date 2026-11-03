@@ -87,6 +87,11 @@ def evaluate_profitability(data: ProfitabilityInput) -> ProfitabilityResult:
     component_ids = [cost.component_id for cost in costs]
     if len(component_ids) != len(set(component_ids)):
         reasons.append(RejectionReason.INCOMPLETE_DATA)
+    if RejectionReason.INCOMPLETE_DATA in reasons:
+        # Cross-currency sums and duplicate components have no meaningful total.
+        return ProfitabilityResult(
+            False, None, tuple(dict.fromkeys(reasons)), None
+        )
     total_costs = sum((cost.amount for cost in costs), Decimal("0"))
 
     buy_age = (data.evaluated_at - data.opportunity.buy_quote.observed_at).total_seconds()
