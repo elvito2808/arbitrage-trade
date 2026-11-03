@@ -225,3 +225,15 @@ def test_configure_logging_is_idempotent_for_handler_and_filter():
     assert logger.handlers.count(handler) == 1
     assert sum(isinstance(item, RedactingFilter) for item in handler.filters) == 1
     logger.removeHandler(handler)
+
+
+def test_default_configure_logging_is_idempotent():
+    logger = logging.getLogger("test.redaction.default-idempotent")
+    logger.handlers.clear()
+    first = configure_logging(logger=logger)
+    second = configure_logging(logger=logger)
+    assert first is second
+    assert logger.handlers == [first]
+    assert sum(isinstance(item, RedactingFilter) for item in first.filters) == 1
+    logger.removeHandler(first)
+    first.close()
