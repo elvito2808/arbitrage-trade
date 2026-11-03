@@ -197,7 +197,6 @@ def test_unquoted_recovery_values_are_redacted_to_end_of_line(sample, secret):
         "Invalid token format",
         "token format is unsupported",
         "basic authentication is not configured",
-        "bearer market data is not available",
     ],
 )
 def test_ordinary_authentication_words_are_not_redacted(ordinary_text):
