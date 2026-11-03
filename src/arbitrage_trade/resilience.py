@@ -15,8 +15,8 @@ T = TypeVar("T")
 class TransientHTTPError(RuntimeError):
     """HTTP status eligible for a bounded retry (429 or 5xx)."""
 _SECRET_PATTERNS = (
-    re.compile(r"(?i)(api[_-]?key|secret|password|token|authorization)(\s*[=:]\s*)[^\s,;]+"),
-    re.compile(r"(?i)\\b(?:0x)?[a-f0-9]{64}\\b"),
+    re.compile(r"(?i)(api[_-]?key|secret|password|token|authorization)(\s*[=:]\s*)(?:bearer\s+)?[^\s,;]+"),
+    re.compile(r"(?i)\b(?:0x)?[a-f0-9]{64}\b"),
 )
 
 
