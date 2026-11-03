@@ -14,8 +14,20 @@ T = TypeVar("T")
 
 class TransientHTTPError(RuntimeError):
     """HTTP status eligible for a bounded retry (429 or 5xx)."""
+_SECRET_KEY = (
+    r"(?:api[_-]?key|secret|password|token|authorization|private[_-]?key|"
+    r"mnemonic|seed|passphrase)"
+)
 _SECRET_PATTERNS = (
-    re.compile(r"(?i)(api[_-]?key|secret|password|token|authorization)(\s*[=:]\s*)(?:bearer\s+)?[^\s,;]+"),
+    re.compile(
+        rf"""(?ix)(?P<prefix>["']?{_SECRET_KEY}["']?\s*[:=]\s*)"""
+        rf"""(?P<quote>["'])(?P<value>.*?)(?P=quote)"""
+    ),
+    re.compile(
+        rf"""(?i)(?P<prefix>["']?{_SECRET_KEY}["']?\s*[:=]\s*)"""
+        r"""(?:(?:bearer|basic|token)\s+)?[^\s,;}]+"""
+    ),
+    re.compile(r"(?i)\b(?:bearer|basic|token)\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"(?i)\b(?:0x)?[a-f0-9]{64}\b"),
 )
 
@@ -23,9 +35,26 @@ _SECRET_PATTERNS = (
 def redact(value: object) -> str:
     text = str(value)
     for pattern in _SECRET_PATTERNS:
-        text = pattern.sub(lambda match: (match.group(1) + match.group(2) + "[REDACTED]")
-                           if match.lastindex and match.lastindex >= 2 else "[REDACTED]", text)
+        if "prefix" in pattern.groupindex:
+            text = pattern.sub(lambda match: match.group("prefix") + "[REDACTED]", text)
+        else:
+            text = pattern.sub("[REDACTED]", text)
     return text
+
+
+def configure_logging(
+    *,
+    level: int = logging.INFO,
+    handler: logging.Handler | None = None,
+    logger: logging.Logger | None = None,
+) -> logging.Handler:
+    """Configure a handler with secret redaction enabled."""
+    target = logger or logging.getLogger()
+    configured_handler = handler or logging.StreamHandler()
+    configured_handler.addFilter(RedactingFilter())
+    target.setLevel(level)
+    target.addHandler(configured_handler)
+    return configured_handler
 
 
 class RedactingFilter(logging.Filter):
