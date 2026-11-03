@@ -1,6 +1,6 @@
 import pytest
 
-from arbitrage_trade.core import MarketQuote, to_decimal
+from arbitrage_trade.core import MarketQuote, SwapQuote, to_decimal
 
 
 def test_decimal_conversion_is_exact():
@@ -21,9 +21,6 @@ def test_quote_spread():
 def test_inverted_quote_is_rejected():
     with pytest.raises(ValueError):
         MarketQuote("BTC-USDT", "101", "99")
-
-
-from arbitrage_trade.core import SwapQuote
 
 
 def test_swap_quote_preserves_raw_token_units():
