@@ -3,7 +3,7 @@ import logging
 import pytest
 
 from arbitrage_trade.registry import Registry, RegistryError
-from arbitrage_trade.resilience import RedactingFilter, redact, retry_call
+from arbitrage_trade.resilience import (\n    RedactingFilter, configure_logging, redact, retry_call,\n)
 
 
 def test_registry_rejects_duplicates_and_supports_replace():
@@ -80,3 +80,50 @@ def test_redacting_filter_sanitizes_exception_tracebacks_and_stack_info():
 def test_redact_handles_bearer_authorization_value():
     assert "Bearer hidden" not in redact("Authorization: Bearer hidden")
     assert "b" * 64 not in redact("private=" + "b" * 64)
+
+
+@pytest.mark.parametrize(
+    ("sample", "secret"),
+    [
+        ("Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
+        ("authorization=Token abc.def-123", "abc.def-123"),
+        ("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9", "eyJhbGciOiJIUzI1NiJ9"),
+        ('{"api_key": "value with spaces"}', "value with spaces"),
+        ('{"private_key":"0x' + "a" * 64 + '"}', "0x" + "a" * 64),
+        ('{"mnemonic": "twelve secret words here"}', "twelve secret words here"),
+        ('{"seed": "seed material"}', "seed material"),
+        ('{"passphrase": "a phrase with spaces"}', "a phrase with spaces"),
+        ('{"token": "quoted token"}', "quoted token"),
+    ],
+)
+def test_redact_all_supported_secret_formats(sample, secret):
+    output = redact(sample)
+    assert secret not in output
+    assert "[REDACTED]" in output
+
+
+def test_real_stack_info_logging_is_formatted_and_redacted():
+    import io
+
+    logger = logging.getLogger("test.redaction.real-stack")
+    logger.handlers.clear()
+    logger.propagate = False
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    configure_logging(handler=handler, logger=logger)
+    logger.warning('payload={"mnemonic": "words with spaces"}', stack_info=True)
+    output = stream.getvalue()
+    assert "words with spaces" not in output
+    assert "Stack (most recent call last)" in output
+    logger.removeHandler(handler)
+
+
+def test_configure_logging_attaches_redaction_filter():
+    logger = logging.getLogger("test.redaction.configure")
+    logger.handlers.clear()
+    logger.propagate = False
+    handler = logging.NullHandler()
+    configured = configure_logging(handler=handler, logger=logger)
+    assert configured is handler
+    assert any(isinstance(item, RedactingFilter) for item in handler.filters)
+    logger.removeHandler(handler)
