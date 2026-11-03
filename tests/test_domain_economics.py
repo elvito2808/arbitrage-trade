@@ -102,12 +102,16 @@ def test_duplicate_fee_component_is_rejected_to_prevent_double_counting():
     fee = Cost("same", "0.1", "trading", QUOTE)
     result = evaluate_profitability(valid_input(trading_costs=(fee,), transfer_costs=(fee,)))
     assert RejectionReason.INCOMPLETE_DATA in result.rejection_reasons
+    assert result.net_profit is None
+    assert result.total_costs is None
 
 
 def test_cross_currency_cost_is_rejected():
     fee = Cost("foreign-fee", "0.1", "trading", "BTC")
     result = evaluate_profitability(valid_input(trading_costs=(fee,)))
     assert RejectionReason.INCOMPLETE_DATA in result.rejection_reasons
+    assert result.net_profit is None
+    assert result.total_costs is None
 
 
 def test_non_positive_net_and_capital_limit_are_rejected():
