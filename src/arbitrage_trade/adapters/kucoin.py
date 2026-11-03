@@ -95,8 +95,14 @@ def map_market_quote_to_price_quote(quote: MarketQuote, market: Market) -> Price
         raise AdapterError("KuCoin quote is missing its timestamp")
     if quote.bid_size is None or quote.ask_size is None:
         raise AdapterError("KuCoin quote is missing bid/ask size")
-    if quote.symbol.replace("-", "").upper() != market.market_id.replace("-", "").upper():
-        raise AdapterError("KuCoin symbol does not match the supplied market")
+    if market.venue.lower() != "kucoin":
+        raise AdapterError("Market venue does not match KuCoin")
+    expected_symbol = f"{market.base.symbol}-{market.quote.symbol}".upper()
+    normalized_symbol = quote.symbol.strip().upper().replace("/", "-")
+    if normalized_symbol != expected_symbol:
+        raise AdapterError("KuCoin symbol does not match market base/quote assets")
+    if quote.timestamp_ms <= 0:
+        raise AdapterError("KuCoin quote timestamp is invalid")
     try:
         observed_at = datetime.fromtimestamp(quote.timestamp_ms / 1000, tz=UTC)
         return PriceQuote(
