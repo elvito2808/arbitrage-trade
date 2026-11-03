@@ -3,7 +3,9 @@ import logging
 import pytest
 
 from arbitrage_trade.registry import Registry, RegistryError
-from arbitrage_trade.resilience import (\n    RedactingFilter, configure_logging, redact, retry_call,\n)
+from arbitrage_trade.resilience import (
+    RedactingFilter, configure_logging, redact, retry_call,
+)
 
 
 def test_registry_rejects_duplicates_and_supports_replace():
