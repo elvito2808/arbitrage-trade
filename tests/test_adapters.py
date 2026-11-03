@@ -406,3 +406,91 @@ def test_kucoin_does_not_retry_http_4xx(monkeypatch, status):
     with pytest.raises(AdapterError, match=f"HTTP {status}"):
         KuCoinAdapter(retry_attempts=3, retry_base_delay=0).get_quote("AAA-USDT")
     assert calls["count"] == 1
+
+
+def test_kucoin_mapper_rejects_market_venue_and_asset_symbol_mismatch():
+    quote = MarketQuote(
+        "BTC-USDT", "99", "100", timestamp_ms=1_000,
+        bid_size="2", ask_size="3", source="kucoin",
+    )
+    wrong_venue = Market("other", "BTC-USDT", Asset("BTC"), Asset("USDT"), "spot")
+    wrong_base = Market("kucoin", "ETH-USDT", Asset("ETH"), Asset("USDT"), "spot")
+    wrong_quote = Market("kucoin", "BTC-USDC", Asset("BTC"), Asset("USDC"), "spot")
+    with pytest.raises(AdapterError, match="venue"):
+        map_market_quote_to_price_quote(quote, wrong_venue)
+    with pytest.raises(AdapterError, match="base/quote"):
+        map_market_quote_to_price_quote(quote, wrong_base)
+    with pytest.raises(AdapterError, match="base/quote"):
+        map_market_quote_to_price_quote(quote, wrong_quote)
+
+
+@pytest.mark.parametrize("timestamp_ms", [0, -1, 10**30])
+def test_kucoin_mapper_rejects_invalid_timestamp(timestamp_ms):
+    market = Market("kucoin", "BTC-USDT", Asset("BTC"), Asset("USDT"), "spot")
+    quote = MarketQuote(
+        "BTC-USDT", "99", "100", timestamp_ms=timestamp_ms,
+        bid_size="2", ask_size="3", source="kucoin",
+    )
+    with pytest.raises(AdapterError, match="timestamp"):
+        map_market_quote_to_price_quote(quote, market)
+
+
+def test_kucoin_get_quote_to_domain_price_quote_end_to_end(monkeypatch):
+    monkeypatch.setattr(
+        "arbitrage_trade.adapters.kucoin.urlopen",
+        lambda *args, **kwargs: FakeResponse({
+            "code": "200000",
+            "data": {
+                "bestBid": "99.25",
+                "bestAsk": "99.50",
+                "bestBidSize": "2.5",
+                "bestAskSize": "3.5",
+                "time": 1_700_000_000_000,
+            },
+        }),
+    )
+    market = Market("kucoin", "BTC-USDT", Asset("BTC"), Asset("USDT"), "spot")
+    raw_quote = KuCoinAdapter().get_quote("BTC-USDT")
+    domain_quote = map_market_quote_to_price_quote(raw_quote, market)
+    assert domain_quote.market is market
+    assert domain_quote.bid_size == 2.5
+    assert domain_quote.ask_size == 3.5
+    assert domain_quote.observed_at.timestamp() == 1_700_000_000
+
+
+def test_plunderswap_rejects_json_rpc_response_without_result(monkeypatch):
+    monkeypatch.setattr(
+        "arbitrage_trade.adapters.plunderswap.urlopen",
+        lambda *args, **kwargs: FakeResponse({"jsonrpc": "2.0", "id": 1}),
+    )
+    with pytest.raises(PlunderSwapRPCError, match="no result"):
+        PlunderSwapAdapter()._rpc("eth_chainId", [])
+
+
+@pytest.mark.parametrize("payload", [None, [], "not-an-object", 42])
+def test_plunderswap_rejects_non_object_json_rpc_payload(monkeypatch, payload):
+    monkeypatch.setattr(
+        "arbitrage_trade.adapters.plunderswap.urlopen",
+        lambda *args, **kwargs: FakeResponse(payload),
+    )
+    with pytest.raises(PlunderSwapRPCError, match="must be an object"):
+        PlunderSwapAdapter()._rpc("eth_chainId", [])
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_plunderswap_http_retry_exhaustion_is_bounded(monkeypatch, status):
+    from urllib.error import HTTPError
+
+    calls = {"count": 0}
+
+    def always_failing(request, timeout):
+        calls["count"] += 1
+        raise HTTPError(request.full_url, status, "still unavailable", {}, None)
+
+    monkeypatch.setattr("arbitrage_trade.adapters.plunderswap.urlopen", always_failing)
+    adapter = PlunderSwapAdapter(
+        config=PlunderSwapConfig(retry_attempts=2, retry_base_delay=0)
+    )
+    with pytest.raises(PlunderSwapRPCError, match=f"HTTP {status}"):
+        adapter._rpc("eth_chainId", [])
+    assert calls["count"] == 2
