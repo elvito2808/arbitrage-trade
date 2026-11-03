@@ -17,7 +17,7 @@ class TransientHTTPError(RuntimeError):
 _SECRET_KEY = (
     r"(?:secret[_-]?access[_-]?key|aws[_-]?secret[_-]?access[_-]?key|"
     r"secret[_-]?key|access[_-]?key|client[_-]?secret|api[_-]?key|"
-    r"private[_-]?key|authorization|auth|secret|password|token|"
+    r"private[_-]?key|auth|secret|password|token|"
     r"mnemonic|seed|passphrase)"
 )
 _SECRET_PATTERNS = (
