@@ -77,7 +77,9 @@ class ProfitabilityResult:
 
 def evaluate_profitability(data: ProfitabilityInput) -> ProfitabilityResult:
     if data.trading_costs is None or data.transfer_costs is None or data.slippage_cost is None:
-        return ProfitabilityResult(False, None, (RejectionReason.UNKNOWN_COST,), None, data.capital_required)
+        return ProfitabilityResult(
+            False, None, (RejectionReason.UNKNOWN_COST,), None, data.capital_required
+        )
 
     reasons: list[RejectionReason] = []
     quote_currency = data.opportunity.sell_quote.market.quote.symbol
