@@ -9,7 +9,7 @@ DecimalLike: TypeAlias = Decimal | str | int
 
 def to_decimal(value: DecimalLike) -> Decimal:
     """Convert an API/user numeric value without introducing binary float error."""
-    if isinstance(value, bool) or isinstance(value, float):
+    if isinstance(value, (bool, float)):
         raise TypeError("Use Decimal, str, or int; float values are not accepted")
     try:
         result = value if isinstance(value, Decimal) else Decimal(value)
@@ -22,6 +22,8 @@ def to_decimal(value: DecimalLike) -> Decimal:
 
 @dataclass(frozen=True, slots=True)
 class MarketQuote:
+    """Best bid/ask quote for a centralized order book."""
+
     symbol: str
     bid: Decimal
     ask: Decimal
@@ -37,6 +39,8 @@ class MarketQuote:
             raise ValueError("bid and ask must be positive")
         if self.ask < self.bid:
             raise ValueError("ask cannot be lower than bid")
+        if self.timestamp_ms is not None and self.timestamp_ms < 0:
+            raise ValueError("timestamp_ms cannot be negative")
 
     @property
     def spread(self) -> Decimal:
@@ -45,3 +49,24 @@ class MarketQuote:
     @property
     def spread_percent(self) -> Decimal:
         return (self.spread / self.ask) * Decimal("100")
+
+
+@dataclass(frozen=True, slots=True)
+class SwapQuote:
+    """Exact-input DEX quote; amounts are raw token base units, not human units."""
+
+    token_in: str
+    token_out: str
+    amount_in: int
+    amount_out: int
+    chain_id: int
+    source: str
+    timestamp_ms: int
+
+    def __post_init__(self) -> None:
+        if self.amount_in <= 0 or self.amount_out <= 0:
+            raise ValueError("swap quote amounts must be positive")
+        if self.chain_id <= 0:
+            raise ValueError("chain_id must be positive")
+        if self.timestamp_ms < 0:
+            raise ValueError("timestamp_ms cannot be negative")
