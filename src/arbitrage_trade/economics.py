@@ -1,6 +1,4 @@
 """Conservative net-profit evaluation; unknown costs and incomplete data reject."""
-from __future__ import annotations
-
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -22,7 +20,7 @@ class RejectionReason(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Cost:
-    """A known cost in the opportunity's quote currency; zero must be explicit."""
+    """Known cost in quote currency; zero must be explicitly supplied."""
     component_id: str
     amount: Decimal
     category: str
@@ -47,8 +45,11 @@ class ProfitabilityInput:
     max_capital: Decimal | None = None
 
     def __post_init__(self) -> None:
-        for field in ("gross_proceeds", "capital_required", "slippage_cost",
-                      "max_quote_age_seconds", "min_net_profit", "max_capital"):
+        fields = (
+            "gross_proceeds", "capital_required", "slippage_cost",
+            "max_quote_age_seconds", "min_net_profit", "max_capital",
+        )
+        for field in fields:
             value = getattr(self, field)
             if value is not None:
                 object.__setattr__(self, field, to_decimal(value))
@@ -67,17 +68,12 @@ class ProfitabilityResult:
 
 
 def evaluate_profitability(data: ProfitabilityInput) -> ProfitabilityResult:
-    reasons: list[RejectionReason] = []
-    required = (data.gross_proceeds, data.capital_required, data.trading_costs,
-                data.transfer_costs, data.slippage_cost)
-    if any(value is None for value in required):
-        return ProfitabilityResult(False, None, (RejectionReason.UNKNOWN_COST
-            if data.trading_costs is None or data.transfer_costs is None or data.slippage_cost is None
-            else RejectionReason.INCOMPLETE_DATA,), None)
+    if data.trading_costs is None or data.transfer_costs is None or data.slippage_cost is None:
+        return ProfitabilityResult(False, None, (RejectionReason.UNKNOWN_COST,), None)
+    if data.gross_proceeds is None or data.capital_required is None:
+        return ProfitabilityResult(False, None, (RejectionReason.INCOMPLETE_DATA,), None)
 
-    assert data.gross_proceeds is not None and data.capital_required is not None
-    assert data.trading_costs is not None and data.transfer_costs is not None
-    assert data.slippage_cost is not None
+    reasons: list[RejectionReason] = []
     if data.gross_proceeds < 0 or data.capital_required < 0 or data.slippage_cost < 0:
         reasons.append(RejectionReason.INCOMPLETE_DATA)
 
@@ -87,22 +83,19 @@ def evaluate_profitability(data: ProfitabilityInput) -> ProfitabilityResult:
         reasons.append(RejectionReason.STALE_QUOTE)
 
     quantity = data.opportunity.base_quantity
-    buy_ask_size = data.opportunity.buy_quote.ask_size
-    sell_bid_size = data.opportunity.sell_quote.bid_size
-    if buy_ask_size is None or sell_bid_size is None:
-        reasons.append(RejectionReason.INSUFFICIENT_VOLUME)
-    elif buy_ask_size < quantity or sell_bid_size < quantity:
+    buy_size = data.opportunity.buy_quote.ask_size
+    sell_size = data.opportunity.sell_quote.bid_size
+    if buy_size is None or sell_size is None or buy_size < quantity or sell_size < quantity:
         reasons.append(RejectionReason.INSUFFICIENT_VOLUME)
 
     costs = data.trading_costs + data.transfer_costs
-    ids = [cost.component_id for cost in costs]
-    if len(ids) != len(set(ids)):
-        reasons.append(RejectionReason.INCOMPLETE_DATA)
-    if any(cost.amount < 0 for cost in costs):
+    component_ids = [cost.component_id for cost in costs]
+    if len(component_ids) != len(set(component_ids)):
         reasons.append(RejectionReason.INCOMPLETE_DATA)
     total_costs = sum((cost.amount for cost in costs), Decimal("0")) + data.slippage_cost
     if data.max_capital is not None and data.capital_required > data.max_capital:
         reasons.append(RejectionReason.LIMIT_EXCEEDED)
+
     net = data.gross_proceeds - data.capital_required - total_costs
     if net <= data.min_net_profit:
         reasons.append(RejectionReason.NON_POSITIVE_NET)
@@ -117,7 +110,9 @@ class OpportunityScorer(Protocol):
 @dataclass(frozen=True, slots=True)
 class NetProfitScorer:
     def score(self, result: ProfitabilityResult) -> Decimal:
-        return result.net_profit if result.accepted and result.net_profit is not None else Decimal("-Infinity")
+        if not result.accepted or result.net_profit is None:
+            return Decimal("-Infinity")
+        return result.net_profit
 
 
 @dataclass(frozen=True, slots=True)

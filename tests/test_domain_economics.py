@@ -1,12 +1,26 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
-from arbitrage_trade.domain import Asset, Market, PriceQuote, ArbitrageOpportunity, Order, OrderStatus, TradeResult
-from arbitrage_trade.economics import Cost, ProfitabilityInput, RejectionReason, evaluate_profitability, NetProfitScorer
+from arbitrage_trade.domain import (
+    ArbitrageOpportunity,
+    Asset,
+    Market,
+    Order,
+    OrderStatus,
+    PriceQuote,
+    TradeResult,
+)
+from arbitrage_trade.economics import (
+    Cost,
+    NetProfitScorer,
+    ProfitabilityInput,
+    RejectionReason,
+    evaluate_profitability,
+)
 
-NOW = datetime(2026, 11, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 3, tzinfo=UTC)
 
 
 def setup_opportunity(*, age=0, ask_size="5", bid_size="5"):
@@ -20,11 +34,13 @@ def setup_opportunity(*, age=0, ask_size="5", bid_size="5"):
 
 def valid_input(**overrides):
     values = dict(
-        opportunity=setup_opportunity(), gross_proceeds=Decimal("102"),
+        opportunity=setup_opportunity(),
+        gross_proceeds=Decimal("102"),
         capital_required=Decimal("100"),
         trading_costs=(Cost("buy-fee", "0.1", "trading"), Cost("sell-fee", "0.1", "trading")),
         transfer_costs=(Cost("network-fee", "0.2", "transfer"),),
-        slippage_cost=Decimal("0.3"), evaluated_at=NOW,
+        slippage_cost=Decimal("0.3"),
+        evaluated_at=NOW,
     )
     values.update(overrides)
     return ProfitabilityInput(**values)
@@ -49,7 +65,11 @@ def test_net_profit_subtracts_each_explicit_cost_once():
 
 
 def test_unknown_fee_or_slippage_never_defaults_to_zero():
-    for kwargs in ({"trading_costs": None}, {"transfer_costs": None}, {"slippage_cost": None}):
+    for kwargs in (
+        {"trading_costs": None},
+        {"transfer_costs": None},
+        {"slippage_cost": None},
+    ):
         result = evaluate_profitability(valid_input(**kwargs))
         assert not result.accepted
         assert RejectionReason.UNKNOWN_COST in result.rejection_reasons
@@ -61,7 +81,10 @@ def test_stale_quotes_are_rejected():
 
 
 def test_insufficient_or_unknown_volume_is_rejected():
-    for opportunity in (setup_opportunity(ask_size="0.5"), setup_opportunity(ask_size=None)):
+    for opportunity in (
+        setup_opportunity(ask_size="0.5"),
+        setup_opportunity(ask_size=None),
+    ):
         result = evaluate_profitability(valid_input(opportunity=opportunity))
         assert RejectionReason.INSUFFICIENT_VOLUME in result.rejection_reasons
 

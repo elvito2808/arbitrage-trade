@@ -1,8 +1,6 @@
-"""Venue-agnostic domain models. All monetary values use explicit Decimal units."""
-from __future__ import annotations
-
+"""Venue-independent domain models with explicit units and timestamps."""
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
 
@@ -143,4 +141,4 @@ class TradeResult:
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
