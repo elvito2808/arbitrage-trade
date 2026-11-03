@@ -58,7 +58,7 @@ def test_domain_models_validate_and_preserve_optional_decimals():
     market = Market("venue", "TOK-USD", asset, Asset("USD"), "spot")
     order = Order("o1", market, "buy", "2", OrderStatus.PENDING)
     result = TradeResult(order, "1", "10", "0.01")
-    assert result.filled_quantity == Decimal("1")
+    assert result.filled_quantity == Decimal("1")\n    assert order.side is OrderSide.BUY
     with pytest.raises(ValueError):
         Asset("TOK", decimals=256)
 
@@ -136,3 +136,43 @@ def test_profitability_limits_must_be_non_negative():
         valid_input(min_net_profit="-1")
     with pytest.raises(ValueError):
         valid_input(max_capital="-1")
+
+
+def test_asset_contract_address_requires_chain_and_is_normalized():
+    with pytest.raises(ValueError, match="requires chain_id"):
+        Asset("TOK", contract_address="0x" + "A" * 40)
+    with pytest.raises(ValueError, match="20-byte"):
+        Asset("TOK", chain_id=1, contract_address="0x1234")
+    asset = Asset("TOK", chain_id=1, contract_address="0x" + "A" * 40)
+    assert asset.contract_address == "0x" + "a" * 40
+
+
+def test_order_side_is_normalized_to_str_enum():
+    base, quote = Asset("BTC"), Asset("USDT")
+    market = Market("venue", "BTC-USDT", base, quote, "spot")
+    order = Order("o2", market, "SELL", "1")
+    assert order.side is OrderSide.SELL
+    with pytest.raises(ValueError, match="side must be buy or sell"):
+        Order("o3", market, "hold", "1")
+
+
+def test_net_profit_ratio_scorer_uses_each_opportunities_capital():
+    from dataclasses import replace
+
+    large_capital = evaluate_profitability(valid_input())
+    small_opportunity = replace(setup_opportunity(), base_quantity=Decimal("0.1"))
+    small_capital = evaluate_profitability(
+        valid_input(
+            opportunity=small_opportunity,
+            trading_costs=(Cost("buy-fee", "0.01", "trading", QUOTE),
+                           Cost("sell-fee", "0.01", "trading", QUOTE)),
+            transfer_costs=(Cost("network-fee", "0.01", "transfer", QUOTE),),
+            slippage_cost=Cost("slippage", "0.01", "slippage", QUOTE),
+        )
+    )
+    scorer = NetProfitRatioScorer()
+    assert large_capital.capital_required == Decimal("100")
+    assert small_capital.capital_required == Decimal("10.0")
+    assert large_capital.net_profit == Decimal("1.3")
+    assert small_capital.net_profit == Decimal("0.16")
+    assert scorer.score(small_capital) > scorer.score(large_capital)
