@@ -18,6 +18,7 @@ from arbitrage_trade.economics import (
     ProfitabilityInput,
     RejectionReason,
     evaluate_profitability,
+    profitability_input_from_quotes,
 )
 
 NOW = datetime(2026, 11, 3, tzinfo=UTC)
@@ -108,3 +109,22 @@ def test_ranker_only_scores_accepted_opportunities():
     scorer = NetProfitScorer()
     assert scorer.score(accepted) == Decimal("1.3")
     assert scorer.score(rejected).is_infinite()
+
+def test_profitability_input_derives_gross_and_capital_from_quote_prices():
+    data = profitability_input_from_quotes(
+        setup_opportunity(),
+        trading_costs=(),
+        transfer_costs=(),
+        slippage_cost=Decimal("0"),
+        evaluated_at=NOW,
+    )
+    assert data.gross_proceeds == Decimal("102")
+    assert data.capital_required == Decimal("100")
+    assert evaluate_profitability(data).accepted
+
+
+def test_profitability_limits_must_be_non_negative():
+    with pytest.raises(ValueError):
+        valid_input(min_net_profit="-1")
+    with pytest.raises(ValueError):
+        valid_input(max_capital="-1")

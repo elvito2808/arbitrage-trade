@@ -57,6 +57,10 @@ class ProfitabilityInput:
             raise ValueError("evaluated_at must be timezone-aware")
         if self.max_quote_age_seconds < 0:
             raise ValueError("max_quote_age_seconds cannot be negative")
+        if self.min_net_profit < 0:
+            raise ValueError("min_net_profit cannot be negative")
+        if self.max_capital is not None and self.max_capital < 0:
+            raise ValueError("max_capital cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +69,32 @@ class ProfitabilityResult:
     net_profit: Decimal | None
     rejection_reasons: tuple[RejectionReason, ...]
     total_costs: Decimal | None
+
+def profitability_input_from_quotes(
+    opportunity: ArbitrageOpportunity,
+    *,
+    trading_costs: tuple[Cost, ...] | None,
+    transfer_costs: tuple[Cost, ...] | None,
+    slippage_cost: Decimal | None,
+    evaluated_at: datetime,
+    max_quote_age_seconds: Decimal = Decimal("5"),
+    min_net_profit: Decimal = Decimal("0"),
+    max_capital: Decimal | None = None,
+) -> ProfitabilityInput:
+    """Derive gross proceeds and capital from quotes in their common quote asset."""
+    quantity = opportunity.base_quantity
+    return ProfitabilityInput(
+        opportunity=opportunity,
+        gross_proceeds=opportunity.sell_quote.bid * quantity,
+        capital_required=opportunity.buy_quote.ask * quantity,
+        trading_costs=trading_costs,
+        transfer_costs=transfer_costs,
+        slippage_cost=slippage_cost,
+        evaluated_at=evaluated_at,
+        max_quote_age_seconds=max_quote_age_seconds,
+        min_net_profit=min_net_profit,
+        max_capital=max_capital,
+    )
 
 
 def evaluate_profitability(data: ProfitabilityInput) -> ProfitabilityResult:
