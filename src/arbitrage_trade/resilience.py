@@ -34,7 +34,7 @@ _SECRET_PATTERNS = (
         r"""(?P<value>[^\s,;}]+)"""
     ),
     re.compile(
-        r"(?i)(?P<prefix>\bAuthorization\s*:\s*)"
+        r"(?i)(?P<prefix>\bAuthorization\s*[:=]\s*)"
         r"(?:(?:Bearer|Basic|Token)\s+)?[^\s,;]+"
     ),
     re.compile(r"(?i)(?P<prefix>\bBearer\s+)[A-Za-z0-9._~+/=-]+"),
