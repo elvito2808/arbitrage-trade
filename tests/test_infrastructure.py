@@ -4,7 +4,10 @@ import pytest
 
 from arbitrage_trade.registry import Registry, RegistryError
 from arbitrage_trade.resilience import (
-    RedactingFilter, configure_logging, redact, retry_call,
+    RedactingFilter,
+    configure_logging,
+    redact,
+    retry_call,
 )
 
 
