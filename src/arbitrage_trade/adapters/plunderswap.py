@@ -9,10 +9,11 @@ developer documentation; callers can override them for controlled environments.
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from typing import Any, Callable
 
 from ..core import SwapQuote
 
@@ -85,13 +86,26 @@ class PlunderSwapAdapter:
         try:
             with urlopen(request, timeout=self.config.timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise PlunderSwapRPCError(f"Zilliqa JSON-RPC request failed: {type(exc).__name__}") from exc
+        except (
+            HTTPError,
+            URLError,
+            TimeoutError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise PlunderSwapRPCError(
+                f"Zilliqa JSON-RPC request failed: {type(exc).__name__}"
+            ) from exc
         if not isinstance(payload, dict):
             raise PlunderSwapRPCError("JSON-RPC response must be an object")
         if payload.get("error"):
             error = payload["error"]
-            message = error.get("message", "unknown RPC error") if isinstance(error, dict) else "unknown RPC error"
+            message = (
+                error.get("message", "unknown RPC error")
+                if isinstance(error, dict)
+                else "unknown RPC error"
+            )
             raise PlunderSwapRPCError(f"JSON-RPC {method} failed: {message}")
         if "result" not in payload:
             raise PlunderSwapRPCError(f"JSON-RPC {method} response has no result")
@@ -145,12 +159,18 @@ class PlunderSwapAdapter:
 
         actual_chain_id = self._rpc("eth_chainId", [])
         try:
-            actual_chain_id_int = int(actual_chain_id, 16) if isinstance(actual_chain_id, str) else int(actual_chain_id)
+            actual_chain_id_int = (
+                int(actual_chain_id, 16)
+                if isinstance(actual_chain_id, str)
+                else int(actual_chain_id)
+            )
         except (TypeError, ValueError) as exc:
             raise PlunderSwapRPCError("eth_chainId returned an invalid value") from exc
         if actual_chain_id_int != self.config.chain_id:
             raise PlunderSwapRPCError(
-                f"Wrong network: configured chain_id={self.config.chain_id}, RPC chain_id={actual_chain_id_int}"
+                "Wrong network: "
+                f"configured chain_id={self.config.chain_id}, "
+                f"RPC chain_id={actual_chain_id_int}"
             )
 
         calldata = self._encode_get_amounts_out(raw_amount_in, token_in, token_out)
