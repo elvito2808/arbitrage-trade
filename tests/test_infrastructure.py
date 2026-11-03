@@ -50,3 +50,32 @@ def test_secret_redaction_and_logging_filter():
     record = logging.LogRecord("x", logging.INFO, "", 0, "api_key=abc", (), None)
     assert RedactingFilter().filter(record)
     assert "[REDACTED]" in record.msg
+
+
+def test_redacting_filter_sanitizes_exception_tracebacks_and_stack_info():
+    import io
+
+    logger = logging.getLogger("test.redaction.traceback")
+    logger.handlers.clear()
+    logger.propagate = False
+    logger.setLevel(logging.ERROR)
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.addFilter(RedactingFilter())
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
+    secret = "api_key=super-secret-value"
+    private_key = "0x" + "a" * 64
+    try:
+        raise RuntimeError(f"request failed {secret}; wallet={private_key}")
+    except RuntimeError:
+        logger.exception("adapter failure")
+    output = stream.getvalue()
+    assert "super-secret-value" not in output
+    assert private_key not in output
+    assert "[REDACTED]" in output
+    logger.removeHandler(handler)
+
+
+def test_redact_handles_bearer_authorization_value():
+    assert "Bearer hidden" not in redact("Authorization: Bearer hidden")

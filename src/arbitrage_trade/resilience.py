@@ -5,6 +5,7 @@ import logging
 import random
 import re
 import time
+import traceback
 from collections.abc import Callable
 from typing import TypeVar
 
@@ -31,6 +32,13 @@ class RedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg = redact(record.getMessage())
         record.args = ()
+        if record.exc_info:
+            record.exc_text = redact("".join(traceback.format_exception(*record.exc_info)))
+            record.exc_info = None
+        if record.exc_text:
+            record.exc_text = redact(record.exc_text)
+        if record.stack_info:
+            record.stack_info = redact(record.stack_info)
         return True
 
 

@@ -233,7 +233,7 @@ def test_plunderswap_verifies_configured_v2_deployments_read_only():
         raise AssertionError(f"Unexpected RPC method: {method}")
 
     adapter = PlunderSwapAdapter(rpc_transport=rpc)
-    assert adapter.verify_deployments() == {"router": True, "factory": True}
+    assert adapter.check_deployment_code_presence() == {"router": True, "factory": True}
     assert methods == ["eth_chainId", "eth_getCode", "eth_getCode"]
 
 
@@ -245,4 +245,11 @@ def test_plunderswap_deployment_check_rejects_empty_bytecode():
 
     adapter = PlunderSwapAdapter(rpc_transport=rpc)
     with pytest.raises(PlunderSwapRPCError, match="no deployed bytecode"):
-        adapter.verify_deployments()
+        adapter.check_deployment_code_presence()
+
+
+@pytest.mark.parametrize("bytecode", ["0xzz", "0x600", "0x12xz", ""])
+def test_plunderswap_rejects_malformed_bytecode_hex(bytecode):
+    adapter = PlunderSwapAdapter(rpc_transport=lambda method, params: bytecode)
+    with pytest.raises(PlunderSwapRPCError, match="malformed bytecode hex"):
+        adapter.get_contract_code("0x" + "1" * 40)

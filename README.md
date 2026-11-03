@@ -10,9 +10,9 @@ Python foundation for read-only centralized-exchange and DEX market analysis.
 - Conservative net-profit evaluator: missing costs are rejected; trading, transfer and slippage costs are counted once; stale quotes, insufficient depth, non-positive net profit and capital-limit breaches are rejected.
 - Configurable scoring strategies: net profit and net-profit ratio.
 - Duplicate-safe market, adapter and network registries.
-- Bounded retry/backoff helper and secret-redaction logging filter.
+- Bounded retry/backoff helper and secret-redaction logging filter that sanitizes messages, exception tracebacks and stack information.
 - KuCoin public Spot level-1 ticker (including available top-of-book sizes) and PlunderSwap V2 read-only quote adapter.
-- Read-only PlunderSwap helpers for deployed bytecode (`eth_getCode`) and ERC-20 `decimals()` metadata (`eth_call`); these do not convert raw quote amounts automatically.
+- Read-only PlunderSwap helpers for bytecode presence (`eth_getCode`) and ERC-20 `decimals()` metadata (`eth_call`); bytecode presence is not bytecode identity verification, and raw quote amounts are not converted automatically.
 
 ## Setup
 
@@ -38,7 +38,7 @@ Asset decimals are optional metadata. Raw token base-unit amounts are never conv
 
 ## Safety
 
-No exchange order placement, wallet, private-key handling, transaction signing/submission, token approval or asset transfer is implemented. KuCoin uses public market data; PlunderSwap uses only eth_chainId and eth_call. Never commit secrets or log credentials. Redaction is defense-in-depth, not a universal secret detector.
+No exchange order placement, wallet, private-key handling, transaction signing/submission, token approval or asset transfer is implemented. KuCoin uses public market data; PlunderSwap uses read-only eth_chainId, eth_getCode and eth_call. The logging filter sanitizes formatted exception tracebacks and stack text as defense-in-depth; it is not a universal secret detector, and arbitrary custom LogRecord fields require application-specific handling.
 
 ## Official references
 

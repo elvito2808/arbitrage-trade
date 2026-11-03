@@ -1,254 +1,248 @@
-"""Read-only PlunderSwap v2 quote adapter for Zilliqa EVM.
-
-Only JSON-RPC eth_chainId and eth_call are used. No wallet, private key,
-transaction submission, signing, token approval, or transfer path exists.
-The router address and network defaults are copied from PlunderSwap's official
-developer documentation; callers can override them for controlled environments.
-"""
-
 import json
-import re
-import time
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
-from ..core import SwapQuote
-from ..resilience import TransientHTTPError, retry_call
+import pytest
 
-
-class AdapterNotConfigured(RuntimeError):
-    """Raised when verified deployment metadata is not available."""
+from arbitrage_trade.adapters.kucoin import AdapterError, KuCoinAdapter
+from arbitrage_trade.adapters.plunderswap import (
+    PlunderSwapAdapter,
+    PlunderSwapConfig,
+    PlunderSwapRPCError,
+)
 
 
-class PlunderSwapRPCError(RuntimeError):
-    """Raised when the public JSON-RPC endpoint returns an error."""
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = json.dumps(payload).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return self.payload
 
 
-_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
-_UINT_RE = re.compile(r"^[0-9]+$")
-# Uniswap-v2-compatible selector: getAmountsOut(uint256,address[])
-_GET_AMOUNTS_OUT_SELECTOR = "d06ca61f"
+def test_kucoin_parses_public_level_one_ticker(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        return FakeResponse({
+            "code": "200000",
+            "data": {
+                "bestBid": "99.25",
+                "bestAsk": "99.50",
+                "bestBidSize": "2.5",
+                "bestAskSize": "3.5",
+                "time": 123456,
+            },
+        })
+
+    monkeypatch.setattr("arbitrage_trade.adapters.kucoin.urlopen", fake_urlopen)
+    quote = KuCoinAdapter(timeout=3).get_quote("btc/usdt")
+
+    assert quote.symbol == "BTC-USDT"
+    assert str(quote.bid) == "99.25"
+    assert str(quote.ask) == "99.50"
+    assert quote.timestamp_ms == 123456
+    assert quote.bid_size == 2.5
+    assert quote.ask_size == 3.5
+    assert "symbol=BTC-USDT" in captured["url"]
+    assert captured["timeout"] == 3
 
 
-@dataclass(frozen=True, slots=True)
-class PlunderSwapConfig:
-    rpc_url: str = "https://api.zilliqa.com"
-    chain_id: int = 32769
-    router_address: str = "0x33C6a20D2a605da9Fd1F506ddEd449355f0564fe"
-    factory_address: str = "0xf42d1058f233329185A36B04B7f96105afa1adD2"
-    timeout: float = 10.0
-    retry_attempts: int = 3
-    retry_base_delay: float = 0.1
-
-    def __post_init__(self) -> None:
-        if not self.rpc_url.startswith(("https://", "http://")):
-            raise ValueError("rpc_url must be an HTTP(S) endpoint")
-        if self.chain_id <= 0:
-            raise ValueError("chain_id must be positive")
-        if not _ADDRESS_RE.fullmatch(self.router_address):
-            raise ValueError("router_address must be a 20-byte hex address")
-        if not _ADDRESS_RE.fullmatch(self.factory_address):
-            raise ValueError("factory_address must be a 20-byte hex address")
-        if self.timeout <= 0:
-            raise ValueError("timeout must be positive")
-        if self.retry_attempts < 1 or self.retry_base_delay < 0:
-            raise ValueError("invalid retry configuration")
+def test_kucoin_rejects_api_error(monkeypatch):
+    monkeypatch.setattr(
+        "arbitrage_trade.adapters.kucoin.urlopen",
+        lambda *args, **kwargs: FakeResponse({"code": "400100", "msg": "bad symbol"}),
+    )
+    with pytest.raises(AdapterError):
+        KuCoinAdapter().get_quote("NOT-A-PAIR")
 
 
-RPCTransport = Callable[[str, list[Any]], Any]
+def test_kucoin_rejects_empty_symbol():
+    with pytest.raises(ValueError):
+        KuCoinAdapter().get_quote("  ")
 
 
-class PlunderSwapAdapter:
-    name = "plunderswap"
+def _abi_amounts(values):
+    # ABI encoding for uint256[] return: offset, length, elements.
+    return "0x" + f"{32:064x}" + f"{len(values):064x}" + "".join(
+        f"{value:064x}" for value in values
+    )
 
-    def __init__(
-        self,
-        config: PlunderSwapConfig | None = None,
-        rpc_transport: RPCTransport | None = None,
-    ) -> None:
-        self.config = config or PlunderSwapConfig()
-        self._rpc_transport = rpc_transport
 
-    @property
-    def chain_id(self) -> int:
-        return self.config.chain_id
+def test_plunderswap_v2_quote_is_read_only_and_decodes_raw_units():
+    calls = []
 
-    def _rpc(self, method: str, params: list[Any]) -> Any:
-        if self._rpc_transport is not None:
-            return self._rpc_transport(method, params)
-        body = json.dumps(
-            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-        ).encode("utf-8")
-        request = Request(
-            self.config.rpc_url,
-            data=body,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-            method="POST",
-        )
-        def read_payload():
-            try:
-                with urlopen(request, timeout=self.config.timeout) as response:
-                    return json.loads(response.read().decode("utf-8"))
-            except HTTPError as exc:
-                if exc.code == 429 or 500 <= exc.code <= 599:
-                    raise TransientHTTPError(f"JSON-RPC HTTP {exc.code}") from exc
-                raise PlunderSwapRPCError(f"JSON-RPC HTTP {exc.code}") from exc
+    def rpc(method, params):
+        calls.append((method, params))
+        if method == "eth_chainId":
+            return "0x8001"
+        if method == "eth_call":
+            return _abi_amounts([10**18, 250_000_000])
+        raise AssertionError(f"Unexpected RPC method: {method}")
 
-        try:
-            payload = retry_call(
-                read_payload,
-                retryable=(TransientHTTPError, URLError, TimeoutError, OSError),
-                max_attempts=self.config.retry_attempts,
-                base_delay=self.config.retry_base_delay,
-            )
-        except PlunderSwapRPCError:
-            raise
-        except (TransientHTTPError, URLError, TimeoutError, OSError,
-                UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise PlunderSwapRPCError(
-                f"Zilliqa JSON-RPC request failed: {type(exc).__name__}"
-            ) from exc
-        if not isinstance(payload, dict):
-            raise PlunderSwapRPCError("JSON-RPC response must be an object")
-        if payload.get("error"):
-            error = payload["error"]
-            message = (
-                error.get("message", "unknown RPC error")
-                if isinstance(error, dict)
-                else "unknown RPC error"
-            )
-            raise PlunderSwapRPCError(f"JSON-RPC {method} failed: {message}")
-        if "result" not in payload:
-            raise PlunderSwapRPCError(f"JSON-RPC {method} response has no result")
-        return payload["result"]
+    adapter = PlunderSwapAdapter(rpc_transport=rpc)
+    quote = adapter.get_quote(
+        "0x" + "1" * 40,
+        "0x" + "2" * 40,
+        "1000000000000000000",
+    )
 
-    def verify_deployments(self) -> dict[str, bool]:
-        """Read-only chain and bytecode check for configured V2 router and factory."""
-        actual_chain_id = self._rpc("eth_chainId", [])
-        try:
-            if isinstance(actual_chain_id, str):
-                chain_id = int(actual_chain_id, 16)
-            else:
-                chain_id = int(actual_chain_id)
-        except (TypeError, ValueError) as exc:
-            raise PlunderSwapRPCError("eth_chainId returned an invalid value") from exc
-        if chain_id != self.config.chain_id:
-            raise PlunderSwapRPCError(
-                "Wrong network: "
-                f"configured chain_id={self.config.chain_id}, RPC chain_id={chain_id}"
-            )
-        result: dict[str, bool] = {}
-        for name, address in (
-            ("router", self.config.router_address),
-            ("factory", self.config.factory_address),
-        ):
-            code = self.get_contract_code(address)
-            if code == "0x":
-                raise PlunderSwapRPCError(f"Configured {name} address has no deployed bytecode")
-            result[name] = True
-        return result
+    assert quote.amount_in == 10**18
+    assert quote.amount_out == 250_000_000
+    assert quote.chain_id == 32769
+    assert quote.source == "plunderswap"
+    assert [method for method, _ in calls] == ["eth_chainId", "eth_call"]
+    assert calls[1][1][0]["to"] == adapter.config.router_address
+    assert calls[1][1][1] == "latest"
 
-    def get_contract_code(self, address: str) -> str:
-        """Return deployed bytecode via eth_getCode; empty code means no contract."""
-        address = self._validate_address(address, "address")
-        code = self._rpc("eth_getCode", [address, "latest"])
-        if not isinstance(code, str) or not code.startswith("0x") or len(code) % 2:
-            raise PlunderSwapRPCError("eth_getCode returned malformed bytecode")
-        return code
 
-    def get_token_decimals(self, token_address: str) -> int:
-        """Read ERC-20 decimals without converting any quote amounts."""
-        token_address = self._validate_address(token_address, "token_address")
-        result = self._rpc(
-            "eth_call",
-            [{"to": token_address, "data": "0x313ce567"}, "latest"],
-        )
-        if not isinstance(result, str) or not re.fullmatch(r"0x[0-9a-fA-F]{64}", result):
-            raise PlunderSwapRPCError("decimals() returned malformed ABI data")
-        decimals = int(result, 16)
-        if decimals > 255:
-            raise PlunderSwapRPCError("decimals() returned a value outside uint8")
-        return decimals
+def test_plunderswap_rejects_wrong_chain_before_quote():
+    adapter = PlunderSwapAdapter(rpc_transport=lambda method, params: "0x1")
+    with pytest.raises(PlunderSwapRPCError, match="Wrong network"):
+        adapter.get_quote("0x" + "1" * 40, "0x" + "2" * 40, "1")
 
-    @staticmethod
-    def _validate_address(value: str, label: str) -> str:
-        if not isinstance(value, str) or not _ADDRESS_RE.fullmatch(value):
-            raise ValueError(f"{label} must be a 20-byte 0x-prefixed hex address")
-        return value
 
-    @staticmethod
-    def _encode_get_amounts_out(amount_in: int, token_in: str, token_out: str) -> str:
-        # ABI: selector + amountIn + offset-to-path + array length + address words.
-        path = [token_in, token_out]
-        words = [f"{amount_in:064x}", f"{64:064x}", f"{len(path):064x}"]
-        words.extend(address[2:].lower().rjust(64, "0") for address in path)
-        return "0x" + _GET_AMOUNTS_OUT_SELECTOR + "".join(words)
+@pytest.mark.parametrize(
+    "token_in,token_out,amount",
+    [
+        ("bad", "0x" + "2" * 40, "1"),
+        ("0x" + "1" * 40, "0x" + "1" * 40, "1"),
+        ("0x" + "1" * 40, "0x" + "2" * 40, "1.5"),
+        ("0x" + "1" * 40, "0x" + "2" * 40, "0"),
+    ],
+)
+def test_plunderswap_rejects_invalid_quote_inputs(token_in, token_out, amount):
+    adapter = PlunderSwapAdapter(rpc_transport=lambda method, params: "0x8001")
+    with pytest.raises(ValueError):
+        adapter.get_quote(token_in, token_out, amount)
 
-    @staticmethod
-    def _decode_amounts_out(result: str) -> list[int]:
-        if not isinstance(result, str) or not result.startswith("0x"):
-            raise PlunderSwapRPCError("eth_call returned malformed ABI data")
-        raw = result[2:]
-        if len(raw) % 64 or len(raw) < 128:
-            raise PlunderSwapRPCError("eth_call returned truncated ABI data")
-        try:
-            offset = int(raw[:64], 16)
-            if offset % 32:
-                raise ValueError("unaligned ABI offset")
-            start = offset * 2
-            length = int(raw[start : start + 64], 16)
-            values_start = start + 64
-            values_end = values_start + length * 64
-            if length < 2 or values_end > len(raw):
-                raise ValueError("invalid ABI array length")
-            return [int(raw[i : i + 64], 16) for i in range(values_start, values_end, 64)]
-        except (ValueError, IndexError) as exc:
-            raise PlunderSwapRPCError("eth_call returned invalid getAmountsOut ABI data") from exc
 
-    def get_quote(self, token_in: str, token_out: str, amount_in: str) -> SwapQuote:
-        token_in = self._validate_address(token_in, "token_in")
-        token_out = self._validate_address(token_out, "token_out")
-        if token_in.lower() == token_out.lower():
-            raise ValueError("token_in and token_out must be different")
-        if not isinstance(amount_in, str) or not _UINT_RE.fullmatch(amount_in):
-            raise ValueError("amount_in must be a positive integer string in raw token units")
-        raw_amount_in = int(amount_in)
-        if raw_amount_in <= 0 or raw_amount_in >= 2**256:
-            raise ValueError("amount_in must fit uint256 and be positive")
+def test_plunderswap_config_validates_addresses():
+    with pytest.raises(ValueError):
+        PlunderSwapConfig(router_address="not-an-address")
 
-        actual_chain_id = self._rpc("eth_chainId", [])
-        try:
-            actual_chain_id_int = (
-                int(actual_chain_id, 16)
-                if isinstance(actual_chain_id, str)
-                else int(actual_chain_id)
-            )
-        except (TypeError, ValueError) as exc:
-            raise PlunderSwapRPCError("eth_chainId returned an invalid value") from exc
-        if actual_chain_id_int != self.config.chain_id:
-            raise PlunderSwapRPCError(
-                "Wrong network: "
-                f"configured chain_id={self.config.chain_id}, "
-                f"RPC chain_id={actual_chain_id_int}"
-            )
 
-        calldata = self._encode_get_amounts_out(raw_amount_in, token_in, token_out)
-        result = self._rpc(
-            "eth_call",
-            [{"to": self.config.router_address, "data": calldata}, "latest"],
-        )
-        amounts = self._decode_amounts_out(result)
-        if len(amounts) != 2 or amounts[0] != raw_amount_in or amounts[1] <= 0:
-            raise PlunderSwapRPCError("Router returned an unexpected exact-input quote")
-        return SwapQuote(
-            token_in=token_in,
-            token_out=token_out,
-            amount_in=amounts[0],
-            amount_out=amounts[1],
-            chain_id=actual_chain_id_int,
-            source=self.name,
-            timestamp_ms=int(time.time() * 1000),
-        )
+def test_plunderswap_rejects_malformed_abi_result():
+    adapter = PlunderSwapAdapter(rpc_transport=lambda method, params: (
+        "0x8001" if method == "eth_chainId" else "0x1234"
+    ))
+    with pytest.raises(PlunderSwapRPCError, match="truncated"):
+        adapter.get_quote("0x" + "1" * 40, "0x" + "2" * 40, "1")
+
+
+def test_kucoin_retries_transient_network_failure(monkeypatch):
+    from urllib.error import URLError
+
+    calls = {"count": 0}
+
+    def flaky_urlopen(request, timeout):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise URLError("temporary disconnect")
+        return FakeResponse({
+            "code": "200000",
+            "data": {"bestBid": "10", "bestAsk": "11", "time": 123},
+        })
+
+    monkeypatch.setattr("arbitrage_trade.adapters.kucoin.urlopen", flaky_urlopen)
+    quote = KuCoinAdapter(retry_attempts=2, retry_base_delay=0).get_quote("AAA-USDT")
+    assert quote.bid == 10
+    assert calls["count"] == 2
+
+
+def test_plunderswap_retries_transient_network_failure(monkeypatch):
+    from urllib.error import URLError
+
+    calls = {"count": 0}
+
+    def flaky_urlopen(request, timeout):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise URLError("temporary disconnect")
+        body = json.loads(request.data.decode())
+        if body["method"] == "eth_chainId":
+            return FakeResponse({"jsonrpc": "2.0", "id": 1, "result": "0x8001"})
+        return FakeResponse({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": _abi_amounts([1, 2]),
+        })
+
+    monkeypatch.setattr("arbitrage_trade.adapters.plunderswap.urlopen", flaky_urlopen)
+    adapter = PlunderSwapAdapter(
+        config=PlunderSwapConfig(retry_attempts=2, retry_base_delay=0)
+    )
+    quote = adapter.get_quote("0x" + "1" * 40, "0x" + "2" * 40, "1")
+    assert quote.amount_out == 2
+    assert calls["count"] == 3
+
+
+
+def test_plunderswap_reads_bytecode_and_token_decimals():
+    calls = []
+
+    def rpc(method, params):
+        calls.append((method, params))
+        if method == "eth_getCode":
+            return "0x60006000"
+        if method == "eth_call":
+            return "0x" + f"{18:064x}"
+        raise AssertionError(f"Unexpected RPC method: {method}")
+
+    adapter = PlunderSwapAdapter(rpc_transport=rpc)
+    address = "0x" + "1" * 40
+    assert adapter.get_contract_code(address) == "0x60006000"
+    assert adapter.get_token_decimals(address) == 18
+    assert calls[0][0] == "eth_getCode"
+    assert calls[1][1][0]["data"] == "0x313ce567"
+
+
+def test_plunderswap_rejects_invalid_decimals_response():
+    adapter = PlunderSwapAdapter(rpc_transport=lambda method, params: "0x12")
+    with pytest.raises(PlunderSwapRPCError, match="malformed ABI"):
+        adapter.get_token_decimals("0x" + "1" * 40)
+
+
+def test_kucoin_rejects_invalid_ticker_payload(monkeypatch):
+    monkeypatch.setattr(
+        "arbitrage_trade.adapters.kucoin.urlopen",
+        lambda *args, **kwargs: FakeResponse({
+            "code": "200000",
+            "data": {"bestBid": "not-a-price", "bestAsk": "1", "time": "bad"},
+        }),
+    )
+    with pytest.raises(AdapterError):
+        KuCoinAdapter().get_quote("AAA-USDT")
+
+
+def test_plunderswap_verifies_configured_v2_deployments_read_only():
+    methods = []
+
+    def rpc(method, params):
+        methods.append(method)
+        if method == "eth_chainId":
+            return "0x8001"
+        if method == "eth_getCode":
+            return "0x60006000"
+        raise AssertionError(f"Unexpected RPC method: {method}")
+
+    adapter = PlunderSwapAdapter(rpc_transport=rpc)
+    assert adapter.verify_deployments() == {"router": True, "factory": True}
+    assert methods == ["eth_chainId", "eth_getCode", "eth_getCode"]
+
+
+def test_plunderswap_deployment_check_rejects_empty_bytecode():
+    def rpc(method, params):
+        if method == "eth_chainId":
+            return "0x8001"
+        return "0x"
+
+    adapter = PlunderSwapAdapter(rpc_transport=rpc)
+    with pytest.raises(PlunderSwapRPCError, match="no deployed bytecode"):
+        adapter.verify_deployments()
