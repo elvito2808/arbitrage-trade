@@ -72,11 +72,12 @@ class ProfitabilityResult:
     net_profit: Decimal | None
     rejection_reasons: tuple[RejectionReason, ...]
     total_costs: Decimal | None
+    capital_required: Decimal | None
 
 
 def evaluate_profitability(data: ProfitabilityInput) -> ProfitabilityResult:
     if data.trading_costs is None or data.transfer_costs is None or data.slippage_cost is None:
-        return ProfitabilityResult(False, None, (RejectionReason.UNKNOWN_COST,), None)
+        return ProfitabilityResult(False, None, (RejectionReason.UNKNOWN_COST,), None, data.capital_required)
 
     reasons: list[RejectionReason] = []
     quote_currency = data.opportunity.sell_quote.market.quote.symbol
@@ -90,7 +91,7 @@ def evaluate_profitability(data: ProfitabilityInput) -> ProfitabilityResult:
     if RejectionReason.INCOMPLETE_DATA in reasons:
         # Cross-currency sums and duplicate components have no meaningful total.
         return ProfitabilityResult(
-            False, None, tuple(dict.fromkeys(reasons)), None
+            False, None, tuple(dict.fromkeys(reasons)), None, data.capital_required
         )
     total_costs = sum((cost.amount for cost in costs), Decimal("0"))
 
@@ -112,7 +113,9 @@ def evaluate_profitability(data: ProfitabilityInput) -> ProfitabilityResult:
     if net <= data.min_net_profit:
         reasons.append(RejectionReason.NON_POSITIVE_NET)
     unique_reasons = tuple(dict.fromkeys(reasons))
-    return ProfitabilityResult(not unique_reasons, net, unique_reasons, total_costs)
+    return ProfitabilityResult(
+        not unique_reasons, net, unique_reasons, total_costs, data.capital_required
+    )
 
 
 class OpportunityScorer(Protocol):
@@ -129,14 +132,12 @@ class NetProfitScorer:
 
 @dataclass(frozen=True, slots=True)
 class NetProfitRatioScorer:
-    denominator: Decimal
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "denominator", to_decimal(self.denominator))
-        if self.denominator <= 0:
-            raise ValueError("denominator must be positive")
-
     def score(self, result: ProfitabilityResult) -> Decimal:
-        if not result.accepted or result.net_profit is None:
+        if (
+            not result.accepted
+            or result.net_profit is None
+            or result.capital_required is None
+            or result.capital_required <= 0
+        ):
             return Decimal("-Infinity")
-        return result.net_profit / self.denominator
+        return result.net_profit / result.capital_required
