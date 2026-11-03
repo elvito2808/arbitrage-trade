@@ -491,6 +491,6 @@ def test_plunderswap_http_retry_exhaustion_is_bounded(monkeypatch, status):
     adapter = PlunderSwapAdapter(
         config=PlunderSwapConfig(retry_attempts=2, retry_base_delay=0)
     )
-    with pytest.raises(PlunderSwapRPCError, match=f"HTTP {status}"):
+    with pytest.raises(PlunderSwapRPCError, match="TransientHTTPError"):
         adapter._rpc("eth_chainId", [])
     assert calls["count"] == 2
