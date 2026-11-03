@@ -1,8 +1,8 @@
 """Venue-independent domain models with explicit units and timestamps."""
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
-import re
 from enum import StrEnum
 
 from .core import to_decimal
