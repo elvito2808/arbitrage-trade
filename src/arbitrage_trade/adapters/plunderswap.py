@@ -13,6 +13,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
+
+from ..resilience import TransientHTTPError, retry_call
 from urllib.request import Request, urlopen
 
 from ..core import SwapQuote
@@ -39,6 +41,8 @@ class PlunderSwapConfig:
     router_address: str = "0x33C6a20D2a605da9Fd1F506ddEd449355f0564fe"
     factory_address: str = "0xf42d1058f233329185A36B04B7f96105afa1adD2"
     timeout: float = 10.0
+    retry_attempts: int = 3
+    retry_base_delay: float = 0.1
 
     def __post_init__(self) -> None:
         if not self.rpc_url.startswith(("https://", "http://")):
@@ -51,6 +55,8 @@ class PlunderSwapConfig:
             raise ValueError("factory_address must be a 20-byte hex address")
         if self.timeout <= 0:
             raise ValueError("timeout must be positive")
+        if self.retry_attempts < 1 or self.retry_base_delay < 0:
+            raise ValueError("invalid retry configuration")
 
 
 RPCTransport = Callable[[str, list[Any]], Any]
@@ -83,17 +89,26 @@ class PlunderSwapAdapter:
             headers={"Content-Type": "application/json", "Accept": "application/json"},
             method="POST",
         )
+        def read_payload():
+            try:
+                with urlopen(request, timeout=self.config.timeout) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except HTTPError as exc:
+                if exc.code == 429 or 500 <= exc.code <= 599:
+                    raise TransientHTTPError(f"JSON-RPC HTTP {exc.code}") from exc
+                raise PlunderSwapRPCError(f"JSON-RPC HTTP {exc.code}") from exc
+
         try:
-            with urlopen(request, timeout=self.config.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (
-            HTTPError,
-            URLError,
-            TimeoutError,
-            OSError,
-            UnicodeDecodeError,
-            json.JSONDecodeError,
-        ) as exc:
+            payload = retry_call(
+                read_payload,
+                retryable=(TransientHTTPError, URLError, TimeoutError, OSError),
+                max_attempts=self.config.retry_attempts,
+                base_delay=self.config.retry_base_delay,
+            )
+        except PlunderSwapRPCError:
+            raise
+        except (TransientHTTPError, URLError, TimeoutError, OSError,
+                UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise PlunderSwapRPCError(
                 f"Zilliqa JSON-RPC request failed: {type(exc).__name__}"
             ) from exc
