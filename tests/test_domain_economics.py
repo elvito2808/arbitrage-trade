@@ -15,8 +15,8 @@ from arbitrage_trade.domain import (
 )
 from arbitrage_trade.economics import (
     Cost,
-    NetProfitScorer,
     NetProfitRatioScorer,
+    NetProfitScorer,
     ProfitabilityInput,
     RejectionReason,
     evaluate_profitability,
