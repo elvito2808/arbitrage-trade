@@ -79,3 +79,4 @@ def test_redacting_filter_sanitizes_exception_tracebacks_and_stack_info():
 
 def test_redact_handles_bearer_authorization_value():
     assert "Bearer hidden" not in redact("Authorization: Bearer hidden")
+    assert "b" * 64 not in redact("private=" + "b" * 64)
