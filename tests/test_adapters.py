@@ -369,3 +369,40 @@ def test_plunderswap_does_not_retry_http_4xx(monkeypatch, status):
     with pytest.raises(PlunderSwapRPCError, match=f"HTTP {status}"):
         adapter._rpc("eth_chainId", [])
     assert calls["count"] == 1
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_kucoin_retries_http_429_and_5xx(monkeypatch, status):
+    from urllib.error import HTTPError
+
+    calls = {"count": 0}
+
+    def flaky(request, timeout):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise HTTPError(request.full_url, status, "temporary", {}, None)
+        return FakeResponse({
+            "code": "200000",
+            "data": {"bestBid": "10", "bestAsk": "11", "time": 123},
+        })
+
+    monkeypatch.setattr("arbitrage_trade.adapters.kucoin.urlopen", flaky)
+    quote = KuCoinAdapter(retry_attempts=2, retry_base_delay=0).get_quote("AAA-USDT")
+    assert quote.bid == 10
+    assert calls["count"] == 2
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404])
+def test_kucoin_does_not_retry_http_4xx(monkeypatch, status):
+    from urllib.error import HTTPError
+
+    calls = {"count": 0}
+
+    def failing(request, timeout):
+        calls["count"] += 1
+        raise HTTPError(request.full_url, status, "client error", {}, None)
+
+    monkeypatch.setattr("arbitrage_trade.adapters.kucoin.urlopen", failing)
+    with pytest.raises(AdapterError, match=f"HTTP {status}"):
+        KuCoinAdapter(retry_attempts=3, retry_base_delay=0).get_quote("AAA-USDT")
+    assert calls["count"] == 1
