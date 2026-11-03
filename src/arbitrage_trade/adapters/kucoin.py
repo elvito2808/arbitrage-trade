@@ -1,11 +1,14 @@
 """Minimal public KuCoin ticker adapter. No API key or trading endpoint is used."""
 
 import json
+from datetime import UTC, datetime
+from decimal import Decimal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from ..core import MarketQuote
+from ..domain import Market, PriceQuote
 from ..resilience import TransientHTTPError, retry_call
 
 
@@ -83,3 +86,27 @@ class KuCoinAdapter:
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise AdapterError("KuCoin ticker payload is missing valid bid/ask values") from exc
+
+
+
+def map_market_quote_to_price_quote(quote: MarketQuote, market: Market) -> PriceQuote:
+    """Map a KuCoin ticker into the domain model; time and both sizes are mandatory."""
+    if quote.timestamp_ms is None:
+        raise AdapterError("KuCoin quote is missing its timestamp")
+    if quote.bid_size is None or quote.ask_size is None:
+        raise AdapterError("KuCoin quote is missing bid/ask size")
+    if quote.symbol.replace("-", "").upper() != market.market_id.replace("-", "").upper():
+        raise AdapterError("KuCoin symbol does not match the supplied market")
+    try:
+        observed_at = datetime.fromtimestamp(quote.timestamp_ms / 1000, tz=UTC)
+        return PriceQuote(
+            market=market,
+            bid=quote.bid,
+            ask=quote.ask,
+            observed_at=observed_at,
+            bid_size=Decimal(str(quote.bid_size)),
+            ask_size=Decimal(str(quote.ask_size)),
+            source=quote.source,
+        )
+    except (OverflowError, OSError, ValueError) as exc:
+        raise AdapterError("KuCoin quote timestamp is invalid") from exc
