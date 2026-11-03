@@ -2,8 +2,8 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
-from enum import StrEnum
 import re
+from enum import StrEnum
 
 from .core import to_decimal
 
