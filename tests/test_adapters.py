@@ -424,7 +424,7 @@ def test_kucoin_mapper_rejects_market_venue_and_asset_symbol_mismatch():
         map_market_quote_to_price_quote(quote, wrong_quote)
 
 
-@pytest.mark.parametrize("timestamp_ms", [0, -1, 10**30])
+@pytest.mark.parametrize("timestamp_ms", [0, 10**30])
 def test_kucoin_mapper_rejects_invalid_timestamp(timestamp_ms):
     market = Market("kucoin", "BTC-USDT", Asset("BTC"), Asset("USDT"), "spot")
     quote = MarketQuote(
@@ -494,3 +494,11 @@ def test_plunderswap_http_retry_exhaustion_is_bounded(monkeypatch, status):
     with pytest.raises(PlunderSwapRPCError, match="TransientHTTPError"):
         adapter._rpc("eth_chainId", [])
     assert calls["count"] == 2
+
+
+def test_market_quote_rejects_negative_timestamp_before_mapper():
+    with pytest.raises(ValueError, match="timestamp_ms"):
+        MarketQuote(
+            "BTC-USDT", "99", "100", timestamp_ms=-1,
+            bid_size="2", ask_size="3", source="kucoin",
+        )
