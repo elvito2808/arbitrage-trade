@@ -78,6 +78,8 @@ class KuCoinAdapter:
                 ask=data["bestAsk"],
                 timestamp_ms=timestamp,
                 source=self.name,
+                bid_size=data.get("bestBidSize"),
+                ask_size=data.get("bestAskSize"),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise AdapterError("KuCoin ticker payload is missing valid bid/ask values") from exc

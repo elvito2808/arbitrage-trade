@@ -32,7 +32,7 @@ def test_kucoin_parses_public_level_one_ticker(monkeypatch):
         captured["timeout"] = timeout
         return FakeResponse({
             "code": "200000",
-            "data": {"bestBid": "99.25", "bestAsk": "99.50", "time": 123456},
+            "data": {"bestBid": "99.25", "bestAsk": "99.50", "bestBidSize": "2.5", "bestAskSize": "3.5", "time": 123456},
         })
 
     monkeypatch.setattr("arbitrage_trade.adapters.kucoin.urlopen", fake_urlopen)
@@ -42,6 +42,8 @@ def test_kucoin_parses_public_level_one_ticker(monkeypatch):
     assert str(quote.bid) == "99.25"
     assert str(quote.ask) == "99.50"
     assert quote.timestamp_ms == 123456
+    assert quote.bid_size == 2.5
+    assert quote.ask_size == 3.5
     assert "symbol=BTC-USDT" in captured["url"]
     assert captured["timeout"] == 3
 
@@ -173,3 +175,41 @@ def test_plunderswap_retries_transient_network_failure(monkeypatch):
     quote = adapter.get_quote("0x" + "1" * 40, "0x" + "2" * 40, "1")
     assert quote.amount_out == 2
     assert calls["count"] == 3
+
+
+
+def test_plunderswap_reads_bytecode_and_token_decimals():
+    calls = []
+
+    def rpc(method, params):
+        calls.append((method, params))
+        if method == "eth_getCode":
+            return "0x60006000"
+        if method == "eth_call":
+            return "0x" + f"{18:064x}"
+        raise AssertionError(f"Unexpected RPC method: {method}")
+
+    adapter = PlunderSwapAdapter(rpc_transport=rpc)
+    address = "0x" + "1" * 40
+    assert adapter.get_contract_code(address) == "0x60006000"
+    assert adapter.get_token_decimals(address) == 18
+    assert calls[0][0] == "eth_getCode"
+    assert calls[1][1][0]["data"] == "0x313ce567"
+
+
+def test_plunderswap_rejects_invalid_decimals_response():
+    adapter = PlunderSwapAdapter(rpc_transport=lambda method, params: "0x12")
+    with pytest.raises(PlunderSwapRPCError, match="malformed ABI"):
+        adapter.get_token_decimals("0x" + "1" * 40)
+
+
+def test_kucoin_rejects_invalid_ticker_payload(monkeypatch):
+    monkeypatch.setattr(
+        "arbitrage_trade.adapters.kucoin.urlopen",
+        lambda *args, **kwargs: FakeResponse({
+            "code": "200000",
+            "data": {"bestBid": "not-a-price", "bestAsk": "1", "time": "bad"},
+        }),
+    )
+    with pytest.raises(AdapterError):
+        KuCoinAdapter().get_quote("AAA-USDT")

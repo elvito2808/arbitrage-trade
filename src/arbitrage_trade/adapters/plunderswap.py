@@ -125,6 +125,28 @@ class PlunderSwapAdapter:
             raise PlunderSwapRPCError(f"JSON-RPC {method} response has no result")
         return payload["result"]
 
+    def get_contract_code(self, address: str) -> str:
+        """Return deployed bytecode via eth_getCode; empty code means no contract."""
+        address = self._validate_address(address, "address")
+        code = self._rpc("eth_getCode", [address, "latest"])
+        if not isinstance(code, str) or not code.startswith("0x") or len(code) % 2:
+            raise PlunderSwapRPCError("eth_getCode returned malformed bytecode")
+        return code
+
+    def get_token_decimals(self, token_address: str) -> int:
+        """Read ERC-20 decimals without converting any quote amounts."""
+        token_address = self._validate_address(token_address, "token_address")
+        result = self._rpc(
+            "eth_call",
+            [{"to": token_address, "data": "0x313ce567"}, "latest"],
+        )
+        if not isinstance(result, str) or not re.fullmatch(r"0x[0-9a-fA-F]{64}", result):
+            raise PlunderSwapRPCError("decimals() returned malformed ABI data")
+        decimals = int(result, 16)
+        if decimals > 255:
+            raise PlunderSwapRPCError("decimals() returned a value outside uint8")
+        return decimals
+
     @staticmethod
     def _validate_address(value: str, label: str) -> str:
         if not isinstance(value, str) or not _ADDRESS_RE.fullmatch(value):

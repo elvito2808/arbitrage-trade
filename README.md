@@ -11,7 +11,8 @@ Python foundation for read-only centralized-exchange and DEX market analysis.
 - Configurable scoring strategies: net profit and net-profit ratio.
 - Duplicate-safe market, adapter and network registries.
 - Bounded retry/backoff helper and secret-redaction logging filter.
-- KuCoin public Spot level-1 ticker and PlunderSwap V2 read-only quote adapters.
+- KuCoin public Spot level-1 ticker (including available top-of-book sizes) and PlunderSwap V2 read-only quote adapter.
+- Read-only PlunderSwap helpers for deployed bytecode (`eth_getCode`) and ERC-20 `decimals()` metadata (`eth_call`); these do not convert raw quote amounts automatically.
 
 ## Setup
 
@@ -21,8 +22,9 @@ Python 3.11 or newer.
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
-pytest
 ruff check .
+mypy src/arbitrage_trade
+pytest
 arbitrage-trade
 ```
 
@@ -30,7 +32,7 @@ arbitrage-trade
 
 All monetary calculations use Decimal. Unknown trading fees, transfer costs or slippage are not zero: any missing required cost rejects an evaluation. A zero cost is valid only when explicitly supplied. Cost component identifiers must be unique across trading and transfer costs to prevent duplicate counting. Gross proceeds, capital and every cost must already use the same quote-currency denomination; no FX conversion is performed.
 
-Quotes require timezone-aware timestamps and executable depth on both legs. Missing or insufficient size rejects an opportunity. Quotes older than the configured maximum age (default five seconds) are rejected. The KuCoin level-1 adapter currently supplies bid/ask but not depth sizes, so its output alone cannot pass the profitability gate.
+Quotes require timezone-aware timestamps and executable depth on both legs. Missing or insufficient size rejects an opportunity. Quotes older than the configured maximum age (default five seconds) are rejected. The KuCoin level-1 adapter exposes best bid/ask sizes when supplied by the API. This is only top-of-book depth, not a full order-book liquidity guarantee.
 
 Asset decimals are optional metadata. Raw token base-unit amounts are never converted to display units without verified decimals.
 
@@ -49,6 +51,6 @@ No exchange order placement, wallet, private-key handling, transaction signing/s
 
 - Tests are deterministic and mock-based. No live KuCoin or RPC connectivity, contract bytecode verification, pool existence or liquidity is claimed.
 - PlunderSwap V2 only; V3 is not implemented.
-- Token decimals discovery, gas/fee schedule discovery, FX normalization and execution simulation are not implemented.
-- Retry/backoff and redaction are reusable helpers but adapter network calls are not yet wired through retry_call; automatic adapter retries are not claimed.
+- Automated token metadata registry and conversion helpers, gas/fee schedule discovery, FX normalization and execution simulation are not implemented. The adapter can query decimals, but callers must persist and validate that metadata before any display-unit conversion.
+- KuCoin and PlunderSwap read-only HTTP calls use bounded retries for transient network failures and HTTP 429/5xx responses. JSON-RPC application errors and malformed payloads are not retried.
 - No orders or settlement handling.

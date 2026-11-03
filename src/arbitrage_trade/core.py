@@ -29,6 +29,8 @@ class MarketQuote:
     ask: Decimal
     timestamp_ms: int | None = None
     source: str = ""
+    bid_size: Decimal | None = None
+    ask_size: Decimal | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "bid", to_decimal(self.bid))
@@ -41,6 +43,13 @@ class MarketQuote:
             raise ValueError("ask cannot be lower than bid")
         if self.timestamp_ms is not None and self.timestamp_ms < 0:
             raise ValueError("timestamp_ms cannot be negative")
+        for field in ("bid_size", "ask_size"):
+            value = getattr(self, field)
+            if value is not None:
+                value = to_decimal(value)
+                if value < 0:
+                    raise ValueError(f"{field} cannot be negative")
+                object.__setattr__(self, field, value)
 
     @property
     def spread(self) -> Decimal:
