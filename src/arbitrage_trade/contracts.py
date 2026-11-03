@@ -2,7 +2,7 @@
 
 from typing import Protocol, runtime_checkable
 
-from .core import MarketQuote
+from .core import MarketQuote, SwapQuote
 
 
 @runtime_checkable
@@ -17,7 +17,7 @@ class DEXAdapter(Protocol):
     name: str
     chain_id: int
 
-    def get_quote(self, token_in: str, token_out: str, amount_in: str) -> MarketQuote: ...
+    def get_quote(self, token_in: str, token_out: str, amount_in: str) -> SwapQuote: ...
 
 
 @runtime_checkable
