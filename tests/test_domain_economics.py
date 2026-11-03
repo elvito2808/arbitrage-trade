@@ -8,6 +8,7 @@ from arbitrage_trade.domain import (
     Asset,
     Market,
     Order,
+    OrderSide,
     OrderStatus,
     PriceQuote,
     TradeResult,
@@ -15,6 +16,7 @@ from arbitrage_trade.domain import (
 from arbitrage_trade.economics import (
     Cost,
     NetProfitScorer,
+    NetProfitRatioScorer,
     ProfitabilityInput,
     RejectionReason,
     evaluate_profitability,
@@ -58,7 +60,9 @@ def test_domain_models_validate_and_preserve_optional_decimals():
     market = Market("venue", "TOK-USD", asset, Asset("USD"), "spot")
     order = Order("o1", market, "buy", "2", OrderStatus.PENDING)
     result = TradeResult(order, "1", "10", "0.01")
-    assert result.filled_quantity == Decimal("1")\n    assert order.side is OrderSide.BUY
+    assert result.filled_quantity == Decimal("1")
+    assert order.side is OrderSide.BUY
+    assert order.side is OrderSide.BUY
     with pytest.raises(ValueError):
         Asset("TOK", decimals=256)
 
