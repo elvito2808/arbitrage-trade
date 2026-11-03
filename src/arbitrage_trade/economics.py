@@ -72,7 +72,7 @@ class ProfitabilityResult:
     net_profit: Decimal | None
     rejection_reasons: tuple[RejectionReason, ...]
     total_costs: Decimal | None
-    capital_required: Decimal | None
+    capital_required: Decimal
 
 
 def evaluate_profitability(data: ProfitabilityInput) -> ProfitabilityResult:
