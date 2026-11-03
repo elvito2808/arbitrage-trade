@@ -32,7 +32,13 @@ def test_kucoin_parses_public_level_one_ticker(monkeypatch):
         captured["timeout"] = timeout
         return FakeResponse({
             "code": "200000",
-            "data": {"bestBid": "99.25", "bestAsk": "99.50", "bestBidSize": "2.5", "bestAskSize": "3.5", "time": 123456},
+            "data": {
+                "bestBid": "99.25",
+                "bestAsk": "99.50",
+                "bestBidSize": "2.5",
+                "bestAskSize": "3.5",
+                "time": 123456,
+            },
         })
 
     monkeypatch.setattr("arbitrage_trade.adapters.kucoin.urlopen", fake_urlopen)
