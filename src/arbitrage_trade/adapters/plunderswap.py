@@ -129,12 +129,16 @@ class PlunderSwapAdapter:
         """Read-only chain and bytecode check for configured V2 router and factory."""
         actual_chain_id = self._rpc("eth_chainId", [])
         try:
-            chain_id = int(actual_chain_id, 16) if isinstance(actual_chain_id, str) else int(actual_chain_id)
+            if isinstance(actual_chain_id, str):
+                chain_id = int(actual_chain_id, 16)
+            else:
+                chain_id = int(actual_chain_id)
         except (TypeError, ValueError) as exc:
             raise PlunderSwapRPCError("eth_chainId returned an invalid value") from exc
         if chain_id != self.config.chain_id:
             raise PlunderSwapRPCError(
-                f"Wrong network: configured chain_id={self.config.chain_id}, RPC chain_id={chain_id}"
+                "Wrong network: "
+                f"configured chain_id={self.config.chain_id}, RPC chain_id={chain_id}"
             )
         result: dict[str, bool] = {}
         for name, address in (
