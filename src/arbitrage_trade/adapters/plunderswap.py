@@ -63,6 +63,7 @@ RPCTransport = Callable[[str, list[Any]], Any]
 
 class PlunderSwapAdapter:
     name = "plunderswap"
+    ALLOWED_RPC_METHODS = frozenset({"eth_chainId", "eth_getCode", "eth_call"})
 
     def __init__(
         self,
@@ -77,6 +78,8 @@ class PlunderSwapAdapter:
         return self.config.chain_id
 
     def _rpc(self, method: str, params: list[Any]) -> Any:
+        if method not in self.ALLOWED_RPC_METHODS:
+            raise ValueError(f"RPC method is not allowed: {method}")
         if self._rpc_transport is not None:
             return self._rpc_transport(method, params)
         body = json.dumps(
