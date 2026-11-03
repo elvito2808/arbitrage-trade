@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from arbitrage_trade.adapters.kucoin import AdapterError, KuCoinAdapter
-from arbitrage_trade.adapters.plunderswap import (
+from arbitrage_trade.adapters.kucoin import (\n    AdapterError, KuCoinAdapter, map_market_quote_to_price_quote,\n)
+from arbitrage_trade.core import MarketQuote\nfrom arbitrage_trade.domain import Asset, Market\nfrom arbitrage_trade.adapters.plunderswap import (
     PlunderSwapAdapter,
     PlunderSwapConfig,
     PlunderSwapRPCError,
@@ -284,3 +284,82 @@ def test_plunderswap_rejects_malformed_bytecode_hex(bytecode):
     adapter = PlunderSwapAdapter(rpc_transport=lambda method, params: bytecode)
     with pytest.raises(PlunderSwapRPCError, match="malformed bytecode hex"):
         adapter.get_contract_code("0x" + "1" * 40)
+
+
+def test_kucoin_mapper_requires_timestamp_and_both_sizes():
+    market = Market("kucoin", "BTC-USDT", Asset("BTC"), Asset("USDT"), "spot")
+    missing_time = MarketQuote("BTC-USDT", "99", "100", bid_size="2", ask_size="3")
+    with pytest.raises(AdapterError, match="timestamp"):
+        map_market_quote_to_price_quote(missing_time, market)
+    missing_size = MarketQuote("BTC-USDT", "99", "100", timestamp_ms=123, bid_size="2")
+    with pytest.raises(AdapterError, match="size"):
+        map_market_quote_to_price_quote(missing_size, market)
+
+
+def test_kucoin_mapper_creates_domain_price_quote():
+    market = Market("kucoin", "BTC-USDT", Asset("BTC"), Asset("USDT"), "spot")
+    source = MarketQuote(
+        "BTC-USDT", "99", "100", timestamp_ms=1_000,
+        bid_size="2", ask_size="3", source="kucoin",
+    )
+    quote = map_market_quote_to_price_quote(source, market)
+    assert quote.market is market
+    assert str(quote.bid) == "99"
+    assert str(quote.ask_size) == "3"
+    assert quote.observed_at.timestamp() == 1
+
+
+def test_plunderswap_rpc_method_allowlist_blocks_write_methods():
+    adapter = PlunderSwapAdapter(rpc_transport=lambda method, params: "unexpected")
+    with pytest.raises(ValueError, match="not allowed"):
+        adapter._rpc("eth_sendRawTransaction", ["0xdead"])
+    assert PlunderSwapAdapter.ALLOWED_RPC_METHODS == {
+        "eth_chainId", "eth_getCode", "eth_call"
+    }
+
+
+def test_plunderswap_json_rpc_error_is_not_mistaken_for_result(monkeypatch):
+    monkeypatch.setattr(
+        "arbitrage_trade.adapters.plunderswap.urlopen",
+        lambda *args, **kwargs: FakeResponse({
+            "jsonrpc": "2.0", "id": 1,
+            "error": {"code": -32000, "message": "execution reverted"},
+        }),
+    )
+    with pytest.raises(PlunderSwapRPCError, match="execution reverted"):
+        PlunderSwapAdapter()._rpc("eth_call", [])
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_plunderswap_retries_http_429_and_5xx(monkeypatch, status):
+    from urllib.error import HTTPError
+
+    calls = {"count": 0}
+
+    def flaky(request, timeout):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise HTTPError(request.full_url, status, "temporary", {}, None)
+        return FakeResponse({"jsonrpc": "2.0", "id": 1, "result": "0x8001"})
+
+    monkeypatch.setattr("arbitrage_trade.adapters.plunderswap.urlopen", flaky)
+    adapter = PlunderSwapAdapter(config=PlunderSwapConfig(retry_attempts=2, retry_base_delay=0))
+    assert adapter._rpc("eth_chainId", []) == "0x8001"
+    assert calls["count"] == 2
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404])
+def test_plunderswap_does_not_retry_http_4xx(monkeypatch, status):
+    from urllib.error import HTTPError
+
+    calls = {"count": 0}
+
+    def failing(request, timeout):
+        calls["count"] += 1
+        raise HTTPError(request.full_url, status, "client error", {}, None)
+
+    monkeypatch.setattr("arbitrage_trade.adapters.plunderswap.urlopen", failing)
+    adapter = PlunderSwapAdapter(config=PlunderSwapConfig(retry_attempts=3, retry_base_delay=0))
+    with pytest.raises(PlunderSwapRPCError, match=f"HTTP {status}"):
+        adapter._rpc("eth_chainId", [])
+    assert calls["count"] == 1
