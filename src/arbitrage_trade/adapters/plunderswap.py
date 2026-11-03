@@ -113,6 +113,8 @@ class PlunderSwapAdapter:
             ) from exc
         if not isinstance(payload, dict):
             raise PlunderSwapRPCError("JSON-RPC response must be an object")
+        if payload.get("jsonrpc") != "2.0" or payload.get("id") != 1:
+            raise PlunderSwapRPCError("JSON-RPC response has an invalid version or request id")
         if payload.get("error"):
             error = payload["error"]
             message = (
@@ -189,23 +191,22 @@ class PlunderSwapAdapter:
 
     @staticmethod
     def _decode_amounts_out(result: str) -> list[int]:
-        if not isinstance(result, str) or not result.startswith("0x"):
+        if not isinstance(result, str) or not re.fullmatch(r"0x[0-9a-fA-F]*", result):
             raise PlunderSwapRPCError("eth_call returned malformed ABI data")
         raw = result[2:]
-        if len(raw) % 64 or len(raw) < 128:
+        # getAmountsOut returns one dynamic uint256[]: offset=32, length=2,
+        # then exactly two uint256 words. Reject non-canonical/trailing data.
+        if len(raw) < 256:
             raise PlunderSwapRPCError("eth_call returned truncated ABI data")
+        if len(raw) != 256:
+            raise PlunderSwapRPCError("eth_call returned unexpected ABI data length")
         try:
             offset = int(raw[:64], 16)
-            if offset % 32:
-                raise ValueError("unaligned ABI offset")
-            start = offset * 2
-            length = int(raw[start : start + 64], 16)
-            values_start = start + 64
-            values_end = values_start + length * 64
-            if length < 2 or values_end > len(raw):
-                raise ValueError("invalid ABI array length")
-            return [int(raw[i : i + 64], 16) for i in range(values_start, values_end, 64)]
-        except (ValueError, IndexError) as exc:
+            length = int(raw[64:128], 16)
+            if offset != 32 or length != 2:
+                raise ValueError("unexpected ABI offset or array length")
+            return [int(raw[i : i + 64], 16) for i in (128, 192)]
+        except ValueError as exc:
             raise PlunderSwapRPCError("eth_call returned invalid getAmountsOut ABI data") from exc
 
     def get_quote(self, token_in: str, token_out: str, amount_in: str) -> SwapQuote:
