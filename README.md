@@ -2,69 +2,53 @@
 
 Python foundation for read-only centralized-exchange and DEX market analysis.
 
-## Implemented foundation
+## Current capabilities
 
-- Decimal-only CEX price primitives and explicit raw-unit DEX quote records.
-- Typed CEX, DEX, and network adapter protocols.
-- KuCoin Spot level-1 best bid/ask adapter using its public unauthenticated REST endpoint.
-- PlunderSwap V2 exact-input quote adapter using Zilliqa EVM JSON-RPC `eth_chainId` and `eth_call`.
-- Persian numbered CLI with a public KuCoin ticker lookup.
-- Offline unit tests and GitHub Actions CI.
+- Decimal-only primitives and explicit raw-unit DEX quote records.
+- Venue-independent models: Asset, Market, PriceQuote, ArbitrageOpportunity, Order, OrderStatus and TradeResult.
+- Standardized CEX, DEX, network and market-data protocols.
+- Conservative net-profit evaluator: missing costs are rejected; trading, transfer and slippage costs are counted once; stale quotes, insufficient depth, non-positive net profit and capital-limit breaches are rejected.
+- Configurable scoring strategies: net profit and net-profit ratio.
+- Duplicate-safe market, adapter and network registries.
+- Bounded retry/backoff helper and secret-redaction logging filter.
+- KuCoin public Spot level-1 ticker and PlunderSwap V2 read-only quote adapters.
 
-## Requirements and setup
+## Setup
 
 Python 3.11 or newer.
 
 ```bash
 python -m venv .venv
-# Linux/macOS
 source .venv/bin/activate
-# Windows PowerShell
-.venv\\Scripts\\Activate.ps1
 python -m pip install -e ".[dev]"
 pytest
 ruff check .
 arbitrage-trade
 ```
 
-## Read-only operation and units
+## Calculation and units
 
-The application does not place exchange orders, sign or submit blockchain transactions,
-approve tokens, or transfer assets. KuCoin access uses public market data and needs no
-API credentials. PlunderSwap quotes call only `eth_chainId` and `eth_call` against the
-documented V2 router. The PlunderSwap adapter accepts `amount_in` as an integer string
-in raw token base units and returns raw output base units; it does not guess token
-decimals. Callers must obtain and apply verified token decimals before comparing
-human-readable prices or calculating executable arbitrage.
+All monetary calculations use Decimal. Unknown trading fees, transfer costs or slippage are not zero: any missing required cost rejects an evaluation. A zero cost is valid only when explicitly supplied. Cost component identifiers must be unique across trading and transfer costs to prevent duplicate counting. Gross proceeds, capital and every cost must already use the same quote-currency denomination; no FX conversion is performed.
 
-The adapter checks the RPC's EVM chain ID against the configured chain ID before each
-quote. Default mainnet configuration is based on the official PlunderSwap developer
-documentation. Override RPC/deployment configuration only with independently verified
-metadata.
+Quotes require timezone-aware timestamps and executable depth on both legs. Missing or insufficient size rejects an opportunity. Quotes older than the configured maximum age (default five seconds) are rejected. The KuCoin level-1 adapter currently supplies bid/ask but not depth sizes, so its output alone cannot pass the profitability gate.
 
-## Security boundaries
+Asset decimals are optional metadata. Raw token base-unit amounts are never converted to display units without verified decimals.
 
-- No API keys, private keys, seed phrases, wallet integrations, transaction signing,
-  transaction submission, approvals, or transfer methods are implemented.
-- Do not commit secrets or put them in logs.
-- RPC endpoints and contract addresses are configuration inputs; verify endpoint
-  authenticity and deployed bytecode/ABI before production use.
-- Quotes are indicative snapshots, not guaranteed execution prices. They exclude
-  gas, slippage tolerance, transfer taxes, token decimals conversion, latency, and
-  settlement risk.
+## Safety
 
-## Official integration references
+No exchange order placement, wallet, private-key handling, transaction signing/submission, token approval or asset transfer is implemented. KuCoin uses public market data; PlunderSwap uses only eth_chainId and eth_call. Never commit secrets or log credentials. Redaction is defense-in-depth, not a universal secret detector.
 
-- KuCoin Spot Get Ticker: https://www.kucoin.com/docs-new/rest/spot-trading/market-data/get-ticker
-- PlunderSwap developer contracts: https://docs.plunderswap.com/developers/
-- PlunderSwap V2 Router interface: https://docs.plunderswap.com/developers/v2-contracts/router-v2/
-- Zilliqa EVM endpoints and chain IDs: https://dev.zilliqa.com/zilliqa2/endpoints/
+## Official references
 
-## Current limitations / next work
+- KuCoin ticker: https://www.kucoin.com/docs-new/rest/spot-trading/market-data/get-ticker
+- PlunderSwap contracts: https://docs.plunderswap.com/developers/
+- PlunderSwap V2 router: https://docs.plunderswap.com/developers/v2-contracts/router-v2/
+- Zilliqa EVM endpoints: https://dev.zilliqa.com/zilliqa2/endpoints/
 
-- CI tests use deterministic mocked HTTP and JSON-RPC responses; no live endpoint
-  connectivity or real liquidity/quote validation is claimed.
-- V3 quote routing, token metadata/decimals discovery, fee/gas estimation, cross-venue
-  normalization, stale-quote controls, and profitability calculations remain future work.
-- Before production use, independently verify router deployment/ABI and RPC chain
-  identity, add integration tests against a controlled endpoint, and review rate limits.
+## Limitations
+
+- Tests are deterministic and mock-based. No live KuCoin or RPC connectivity, contract bytecode verification, pool existence or liquidity is claimed.
+- PlunderSwap V2 only; V3 is not implemented.
+- Token decimals discovery, gas/fee schedule discovery, FX normalization and execution simulation are not implemented.
+- Retry/backoff and redaction are reusable helpers but adapter network calls are not yet wired through retry_call; automatic adapter retries are not claimed.
+- No orders or settlement handling.
