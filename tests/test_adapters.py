@@ -136,6 +136,37 @@ def test_plunderswap_rejects_malformed_abi_result():
         adapter.get_quote("0x" + "1" * 40, "0x" + "2" * 40, "1")
 
 
+@pytest.mark.parametrize(
+    "result",
+    [
+        "0x" + "g" * 256,
+        "0x" + f"{64:064x}" + f"{2:064x}" + f"{1:064x}" + f"{2:064x}",
+        "0x" + f"{32:064x}" + f"{1:064x}" + f"{1:064x}" + f"{2:064x}",
+        "0x" + f"{32:064x}" + f"{2:064x}" + f"{1:064x}" + f"{2:064x}" + f"{3:064x}",
+    ],
+)
+def test_plunderswap_rejects_noncanonical_or_non_hex_abi_data(result):
+    with pytest.raises(PlunderSwapRPCError):
+        PlunderSwapAdapter._decode_amounts_out(result)
+
+
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        {"jsonrpc": "1.0", "id": 1, "result": "0x8001"},
+        {"jsonrpc": "2.0", "id": 2, "result": "0x8001"},
+    ],
+)
+def test_plunderswap_rejects_mismatched_json_rpc_envelope(monkeypatch, envelope):
+    monkeypatch.setattr(
+        "arbitrage_trade.adapters.plunderswap.urlopen",
+        lambda *args, **kwargs: FakeResponse(envelope),
+    )
+    adapter = PlunderSwapAdapter()
+    with pytest.raises(PlunderSwapRPCError, match="invalid version or request id"):
+        adapter._rpc("eth_chainId", [])
+
+
 def test_kucoin_retries_transient_network_failure(monkeypatch):
     from urllib.error import URLError
 
