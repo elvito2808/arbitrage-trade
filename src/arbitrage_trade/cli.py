@@ -2,6 +2,7 @@
 
 from . import __version__
 from .adapters.kucoin import AdapterError, KuCoinAdapter
+from .resilience import configure_logging
 
 
 def _show_kucoin_quote() -> None:
@@ -20,6 +21,7 @@ def _show_kucoin_quote() -> None:
 
 
 def main() -> None:
+    configure_logging()
     while True:
         print("\n=== سامانه تحلیل آربیتراژ ===")
         print("1) نمایش وضعیت پروژه")
