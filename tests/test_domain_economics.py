@@ -18,29 +18,34 @@ from arbitrage_trade.economics import (
     ProfitabilityInput,
     RejectionReason,
     evaluate_profitability,
-    profitability_input_from_quotes,
 )
 
 NOW = datetime(2026, 11, 3, tzinfo=UTC)
+QUOTE = "USDT"
 
 
-def setup_opportunity(*, age=0, ask_size="5", bid_size="5"):
-    base, quote = Asset("BTC"), Asset("USDT")
+def setup_opportunity(*, age=0, ask_size="5", bid_size="5", sell_bid="102"):
+    base, quote = Asset("BTC"), Asset(QUOTE)
     buy_market = Market("cex-a", "BTC-USDT", base, quote, "spot")
     sell_market = Market("cex-b", "BTC-USDT", base, quote, "spot")
-    buy = PriceQuote(buy_market, "99", "100", NOW - timedelta(seconds=age), ask_size=ask_size)
-    sell = PriceQuote(sell_market, "102", "103", NOW - timedelta(seconds=age), bid_size=bid_size)
+    buy = PriceQuote(
+        buy_market, "99", "100", NOW - timedelta(seconds=age), ask_size=ask_size
+    )
+    sell = PriceQuote(
+        sell_market, sell_bid, "103", NOW - timedelta(seconds=age), bid_size=bid_size
+    )
     return ArbitrageOpportunity(buy, sell, Decimal("1"), NOW, "opp-1")
 
 
 def valid_input(**overrides):
     values = dict(
         opportunity=setup_opportunity(),
-        gross_proceeds=Decimal("102"),
-        capital_required=Decimal("100"),
-        trading_costs=(Cost("buy-fee", "0.1", "trading"), Cost("sell-fee", "0.1", "trading")),
-        transfer_costs=(Cost("network-fee", "0.2", "transfer"),),
-        slippage_cost=Decimal("0.3"),
+        trading_costs=(
+            Cost("buy-fee", "0.1", "trading", QUOTE),
+            Cost("sell-fee", "0.1", "trading", QUOTE),
+        ),
+        transfer_costs=(Cost("network-fee", "0.2", "transfer", QUOTE),),
+        slippage_cost=Cost("slippage", "0.3", "slippage", QUOTE),
         evaluated_at=NOW,
     )
     values.update(overrides)
@@ -58,8 +63,11 @@ def test_domain_models_validate_and_preserve_optional_decimals():
         Asset("TOK", decimals=256)
 
 
-def test_net_profit_subtracts_each_explicit_cost_once():
-    result = evaluate_profitability(valid_input())
+def test_net_profit_is_derived_from_quotes_and_explicit_costs():
+    data = valid_input()
+    result = evaluate_profitability(data)
+    assert data.gross_proceeds == Decimal("102")
+    assert data.capital_required == Decimal("100")
     assert result.accepted
     assert result.net_profit == Decimal("1.3")
     assert result.total_costs == Decimal("0.7")
@@ -91,13 +99,19 @@ def test_insufficient_or_unknown_volume_is_rejected():
 
 
 def test_duplicate_fee_component_is_rejected_to_prevent_double_counting():
-    fee = Cost("same", "0.1", "trading")
+    fee = Cost("same", "0.1", "trading", QUOTE)
     result = evaluate_profitability(valid_input(trading_costs=(fee,), transfer_costs=(fee,)))
     assert RejectionReason.INCOMPLETE_DATA in result.rejection_reasons
 
 
+def test_cross_currency_cost_is_rejected():
+    fee = Cost("foreign-fee", "0.1", "trading", "BTC")
+    result = evaluate_profitability(valid_input(trading_costs=(fee,)))
+    assert RejectionReason.INCOMPLETE_DATA in result.rejection_reasons
+
+
 def test_non_positive_net_and_capital_limit_are_rejected():
-    loss = evaluate_profitability(valid_input(gross_proceeds="100"))
+    loss = evaluate_profitability(valid_input(opportunity=setup_opportunity(sell_bid="99")))
     assert RejectionReason.NON_POSITIVE_NET in loss.rejection_reasons
     limit = evaluate_profitability(valid_input(max_capital="50"))
     assert RejectionReason.LIMIT_EXCEEDED in limit.rejection_reasons
@@ -105,22 +119,12 @@ def test_non_positive_net_and_capital_limit_are_rejected():
 
 def test_ranker_only_scores_accepted_opportunities():
     accepted = evaluate_profitability(valid_input())
-    rejected = evaluate_profitability(valid_input(gross_proceeds="100"))
+    rejected = evaluate_profitability(
+        valid_input(opportunity=setup_opportunity(sell_bid="99"))
+    )
     scorer = NetProfitScorer()
     assert scorer.score(accepted) == Decimal("1.3")
     assert scorer.score(rejected).is_infinite()
-
-def test_profitability_input_derives_gross_and_capital_from_quote_prices():
-    data = profitability_input_from_quotes(
-        setup_opportunity(),
-        trading_costs=(),
-        transfer_costs=(),
-        slippage_cost=Decimal("0"),
-        evaluated_at=NOW,
-    )
-    assert data.gross_proceeds == Decimal("102")
-    assert data.capital_required == Decimal("100")
-    assert evaluate_profitability(data).accepted
 
 
 def test_profitability_limits_must_be_non_negative():

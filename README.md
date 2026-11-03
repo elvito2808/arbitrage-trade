@@ -30,7 +30,7 @@ arbitrage-trade
 
 ## Calculation and units
 
-All monetary calculations use Decimal. Unknown trading fees, transfer costs or slippage are not zero: any missing required cost rejects an evaluation. A zero cost is valid only when explicitly supplied. Cost component identifiers must be unique across trading and transfer costs to prevent duplicate counting. Gross proceeds, capital and every cost must already use the same quote-currency denomination; no FX conversion is performed.
+All monetary calculations use Decimal. Unknown trading fees, transfer costs or slippage are not zero: any missing required cost rejects an evaluation. A zero cost is valid only when explicitly supplied. Each cost carries a currency and component identifier; the evaluator rejects cross-currency costs and duplicate component IDs across trading, transfer and slippage costs. Gross proceeds and capital are derived directly from the sell bid, buy ask and opportunity quantity, so they cannot be silently supplied in a different unit. No FX conversion is performed.
 
 Quotes require timezone-aware timestamps and executable depth on both legs. Missing or insufficient size rejects an opportunity. Quotes older than the configured maximum age (default five seconds) are rejected. The KuCoin level-1 adapter exposes best bid/ask sizes when supplied by the API. This is only top-of-book depth, not a full order-book liquidity guarantee.
 

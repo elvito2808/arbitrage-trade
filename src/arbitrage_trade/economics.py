@@ -1,4 +1,4 @@
-"""Conservative net-profit evaluation; unknown costs and incomplete data reject."""
+"""Conservative net-profit evaluation; unknown or cross-currency costs reject."""
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -20,47 +20,50 @@ class RejectionReason(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Cost:
-    """Known cost in quote currency; zero must be explicitly supplied."""
+    """Known cost denominated in the opportunity quote asset."""
     component_id: str
     amount: Decimal
     category: str
+    currency: str
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "amount", to_decimal(self.amount))
-        if not self.component_id or not self.category or self.amount < 0:
-            raise ValueError("cost requires an id/category and non-negative amount")
+        if not self.component_id or not self.category or not self.currency:
+            raise ValueError("cost id, category and currency are required")
+        if self.amount < 0:
+            raise ValueError("cost amount cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
 class ProfitabilityInput:
     opportunity: ArbitrageOpportunity
-    gross_proceeds: Decimal | None
-    capital_required: Decimal | None
     trading_costs: tuple[Cost, ...] | None
     transfer_costs: tuple[Cost, ...] | None
-    slippage_cost: Decimal | None
+    slippage_cost: Cost | None
     evaluated_at: datetime
     max_quote_age_seconds: Decimal = Decimal("5")
     min_net_profit: Decimal = Decimal("0")
     max_capital: Decimal | None = None
 
     def __post_init__(self) -> None:
-        fields = (
-            "gross_proceeds", "capital_required", "slippage_cost",
-            "max_quote_age_seconds", "min_net_profit", "max_capital",
-        )
-        for field in fields:
+        for field in ("max_quote_age_seconds", "min_net_profit", "max_capital"):
             value = getattr(self, field)
             if value is not None:
                 object.__setattr__(self, field, to_decimal(value))
         if self.evaluated_at.tzinfo is None:
             raise ValueError("evaluated_at must be timezone-aware")
-        if self.max_quote_age_seconds < 0:
-            raise ValueError("max_quote_age_seconds cannot be negative")
-        if self.min_net_profit < 0:
-            raise ValueError("min_net_profit cannot be negative")
+        if self.max_quote_age_seconds < 0 or self.min_net_profit < 0:
+            raise ValueError("age and minimum profit limits cannot be negative")
         if self.max_capital is not None and self.max_capital < 0:
             raise ValueError("max_capital cannot be negative")
+
+    @property
+    def gross_proceeds(self) -> Decimal:
+        return self.opportunity.sell_quote.bid * self.opportunity.base_quantity
+
+    @property
+    def capital_required(self) -> Decimal:
+        return self.opportunity.buy_quote.ask * self.opportunity.base_quantity
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,42 +73,21 @@ class ProfitabilityResult:
     rejection_reasons: tuple[RejectionReason, ...]
     total_costs: Decimal | None
 
-def profitability_input_from_quotes(
-    opportunity: ArbitrageOpportunity,
-    *,
-    trading_costs: tuple[Cost, ...] | None,
-    transfer_costs: tuple[Cost, ...] | None,
-    slippage_cost: Decimal | None,
-    evaluated_at: datetime,
-    max_quote_age_seconds: Decimal = Decimal("5"),
-    min_net_profit: Decimal = Decimal("0"),
-    max_capital: Decimal | None = None,
-) -> ProfitabilityInput:
-    """Derive gross proceeds and capital from quotes in their common quote asset."""
-    quantity = opportunity.base_quantity
-    return ProfitabilityInput(
-        opportunity=opportunity,
-        gross_proceeds=opportunity.sell_quote.bid * quantity,
-        capital_required=opportunity.buy_quote.ask * quantity,
-        trading_costs=trading_costs,
-        transfer_costs=transfer_costs,
-        slippage_cost=slippage_cost,
-        evaluated_at=evaluated_at,
-        max_quote_age_seconds=max_quote_age_seconds,
-        min_net_profit=min_net_profit,
-        max_capital=max_capital,
-    )
-
 
 def evaluate_profitability(data: ProfitabilityInput) -> ProfitabilityResult:
     if data.trading_costs is None or data.transfer_costs is None or data.slippage_cost is None:
         return ProfitabilityResult(False, None, (RejectionReason.UNKNOWN_COST,), None)
-    if data.gross_proceeds is None or data.capital_required is None:
-        return ProfitabilityResult(False, None, (RejectionReason.INCOMPLETE_DATA,), None)
 
     reasons: list[RejectionReason] = []
-    if data.gross_proceeds < 0 or data.capital_required < 0 or data.slippage_cost < 0:
+    quote_currency = data.opportunity.sell_quote.market.quote.symbol
+    costs = data.trading_costs + data.transfer_costs + (data.slippage_cost,)
+    if any(cost.currency != quote_currency for cost in costs):
         reasons.append(RejectionReason.INCOMPLETE_DATA)
+
+    component_ids = [cost.component_id for cost in costs]
+    if len(component_ids) != len(set(component_ids)):
+        reasons.append(RejectionReason.INCOMPLETE_DATA)
+    total_costs = sum((cost.amount for cost in costs), Decimal("0"))
 
     buy_age = (data.evaluated_at - data.opportunity.buy_quote.observed_at).total_seconds()
     sell_age = (data.evaluated_at - data.opportunity.sell_quote.observed_at).total_seconds()
@@ -118,11 +100,6 @@ def evaluate_profitability(data: ProfitabilityInput) -> ProfitabilityResult:
     if buy_size is None or sell_size is None or buy_size < quantity or sell_size < quantity:
         reasons.append(RejectionReason.INSUFFICIENT_VOLUME)
 
-    costs = data.trading_costs + data.transfer_costs
-    component_ids = [cost.component_id for cost in costs]
-    if len(component_ids) != len(set(component_ids)):
-        reasons.append(RejectionReason.INCOMPLETE_DATA)
-    total_costs = sum((cost.amount for cost in costs), Decimal("0")) + data.slippage_cost
     if data.max_capital is not None and data.capital_required > data.max_capital:
         reasons.append(RejectionReason.LIMIT_EXCEEDED)
 
