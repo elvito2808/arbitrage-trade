@@ -12,3 +12,13 @@ def test_status_menu_and_exit(monkeypatch, capsys):
     assert "فقط‌خواندنی" in output
     assert "هیچ سفارش، معامله" in output
     assert "خروج." in output
+
+
+
+def test_cli_configures_redacting_logging_on_entry(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "configure_logging", lambda: calls.append("configured"))
+    choices = iter(["0"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(choices))
+    cli.main()
+    assert calls == ["configured"]
