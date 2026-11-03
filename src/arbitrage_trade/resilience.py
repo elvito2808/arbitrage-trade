@@ -61,7 +61,7 @@ def configure_logging(
     """Configure a handler with secret redaction enabled."""
     target = logger or logging.getLogger()
     if handler is None:
-        configured_handler = next(
+        configured_handler: logging.Handler | None = next(
             (
                 item for item in target.handlers
                 if isinstance(item, logging.StreamHandler)
