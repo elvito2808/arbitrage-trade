@@ -2,8 +2,12 @@ import json
 
 import pytest
 
-from arbitrage_trade.adapters.kucoin import (\n    AdapterError, KuCoinAdapter, map_market_quote_to_price_quote,\n)
-from arbitrage_trade.core import MarketQuote\nfrom arbitrage_trade.domain import Asset, Market\nfrom arbitrage_trade.adapters.plunderswap import (
+from arbitrage_trade.adapters.kucoin import (
+    AdapterError, KuCoinAdapter, map_market_quote_to_price_quote,
+)
+from arbitrage_trade.core import MarketQuote
+from arbitrage_trade.domain import Asset, Market
+from arbitrage_trade.adapters.plunderswap import (
     PlunderSwapAdapter,
     PlunderSwapConfig,
     PlunderSwapRPCError,
