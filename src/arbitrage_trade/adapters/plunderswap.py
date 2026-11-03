@@ -125,6 +125,28 @@ class PlunderSwapAdapter:
             raise PlunderSwapRPCError(f"JSON-RPC {method} response has no result")
         return payload["result"]
 
+    def verify_deployments(self) -> dict[str, bool]:
+        """Read-only chain and bytecode check for configured V2 router and factory."""
+        actual_chain_id = self._rpc("eth_chainId", [])
+        try:
+            chain_id = int(actual_chain_id, 16) if isinstance(actual_chain_id, str) else int(actual_chain_id)
+        except (TypeError, ValueError) as exc:
+            raise PlunderSwapRPCError("eth_chainId returned an invalid value") from exc
+        if chain_id != self.config.chain_id:
+            raise PlunderSwapRPCError(
+                f"Wrong network: configured chain_id={self.config.chain_id}, RPC chain_id={chain_id}"
+            )
+        result: dict[str, bool] = {}
+        for name, address in (
+            ("router", self.config.router_address),
+            ("factory", self.config.factory_address),
+        ):
+            code = self.get_contract_code(address)
+            if code == "0x":
+                raise PlunderSwapRPCError(f"Configured {name} address has no deployed bytecode")
+            result[name] = True
+        return result
+
     def get_contract_code(self, address: str) -> str:
         """Return deployed bytecode via eth_getCode; empty code means no contract."""
         address = self._validate_address(address, "address")

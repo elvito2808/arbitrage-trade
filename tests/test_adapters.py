@@ -213,3 +213,30 @@ def test_kucoin_rejects_invalid_ticker_payload(monkeypatch):
     )
     with pytest.raises(AdapterError):
         KuCoinAdapter().get_quote("AAA-USDT")
+
+
+def test_plunderswap_verifies_configured_v2_deployments_read_only():
+    methods = []
+
+    def rpc(method, params):
+        methods.append(method)
+        if method == "eth_chainId":
+            return "0x8001"
+        if method == "eth_getCode":
+            return "0x60006000"
+        raise AssertionError(f"Unexpected RPC method: {method}")
+
+    adapter = PlunderSwapAdapter(rpc_transport=rpc)
+    assert adapter.verify_deployments() == {"router": True, "factory": True}
+    assert methods == ["eth_chainId", "eth_getCode", "eth_getCode"]
+
+
+def test_plunderswap_deployment_check_rejects_empty_bytecode():
+    def rpc(method, params):
+        if method == "eth_chainId":
+            return "0x8001"
+        return "0x"
+
+    adapter = PlunderSwapAdapter(rpc_transport=rpc)
+    with pytest.raises(PlunderSwapRPCError, match="no deployed bytecode"):
+        adapter.verify_deployments()
