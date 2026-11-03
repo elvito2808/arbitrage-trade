@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
+import re
 
 from .core import to_decimal
 
@@ -21,8 +22,14 @@ class Asset:
             raise ValueError("chain_id must be positive")
         if self.decimals is not None and not 0 <= self.decimals <= 255:
             raise ValueError("decimals must be between 0 and 255")
-        if self.contract_address is not None and not self.contract_address:
-            raise ValueError("contract_address cannot be empty")
+        if self.contract_address is not None:
+            if self.chain_id is None:
+                raise ValueError("contract_address requires chain_id")
+            if not isinstance(self.contract_address, str) or not re.fullmatch(
+                r"0x[0-9a-fA-F]{40}", self.contract_address
+            ):
+                raise ValueError("contract_address must be a 20-byte 0x-prefixed hex address")
+            object.__setattr__(self, "contract_address", self.contract_address.lower())
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +97,11 @@ class ArbitrageOpportunity:
             raise ValueError("identifier is required")
 
 
+class OrderSide(StrEnum):
+    BUY = "buy"
+    SELL = "sell"
+
+
 class OrderStatus(StrEnum):
     PENDING = "pending"
     SUBMITTED = "submitted"
@@ -104,15 +116,20 @@ class OrderStatus(StrEnum):
 class Order:
     order_id: str
     market: Market
-    side: str
+    side: OrderSide
     quantity: Decimal
     status: OrderStatus = OrderStatus.PENDING
     client_order_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "quantity", to_decimal(self.quantity))
-        if not self.order_id or self.side.lower() not in {"buy", "sell"}:
-            raise ValueError("order_id and side (buy/sell) are required")
+        if not self.order_id:
+            raise ValueError("order_id is required")
+        try:
+            side = self.side if isinstance(self.side, OrderSide) else OrderSide(self.side.lower())
+        except (AttributeError, ValueError) as exc:
+            raise ValueError("side must be buy or sell") from exc
+        object.__setattr__(self, "side", side)
         if self.quantity <= 0:
             raise ValueError("order quantity must be positive")
 
