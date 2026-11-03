@@ -126,3 +126,50 @@ def test_plunderswap_rejects_malformed_abi_result():
     ))
     with pytest.raises(PlunderSwapRPCError, match="truncated"):
         adapter.get_quote("0x" + "1" * 40, "0x" + "2" * 40, "1")
+
+
+def test_kucoin_retries_transient_network_failure(monkeypatch):
+    from urllib.error import URLError
+
+    calls = {"count": 0}
+
+    def flaky_urlopen(request, timeout):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise URLError("temporary disconnect")
+        return FakeResponse({
+            "code": "200000",
+            "data": {"bestBid": "10", "bestAsk": "11", "time": 123},
+        })
+
+    monkeypatch.setattr("arbitrage_trade.adapters.kucoin.urlopen", flaky_urlopen)
+    quote = KuCoinAdapter(retry_attempts=2, retry_base_delay=0).get_quote("AAA-USDT")
+    assert quote.bid == 10
+    assert calls["count"] == 2
+
+
+def test_plunderswap_retries_transient_network_failure(monkeypatch):
+    from urllib.error import URLError
+
+    calls = {"count": 0}
+
+    def flaky_urlopen(request, timeout):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise URLError("temporary disconnect")
+        body = json.loads(request.data.decode())
+        if body["method"] == "eth_chainId":
+            return FakeResponse({"jsonrpc": "2.0", "id": 1, "result": "0x8001"})
+        return FakeResponse({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": _abi_amounts([1, 2]),
+        })
+
+    monkeypatch.setattr("arbitrage_trade.adapters.plunderswap.urlopen", flaky_urlopen)
+    adapter = PlunderSwapAdapter(
+        config=PlunderSwapConfig(retry_attempts=2, retry_base_delay=0)
+    )
+    quote = adapter.get_quote("0x" + "1" * 40, "0x" + "2" * 40, "1")
+    assert quote.amount_out == 2
+    assert calls["count"] == 3
