@@ -15,19 +15,29 @@ T = TypeVar("T")
 class TransientHTTPError(RuntimeError):
     """HTTP status eligible for a bounded retry (429 or 5xx)."""
 _SECRET_KEY = (
-    r"(?:api[_-]?key|secret|password|token|authorization|private[_-]?key|"
+    r"(?:secret[_-]?access[_-]?key|aws[_-]?secret[_-]?access[_-]?key|"
+    r"secret[_-]?key|access[_-]?key|client[_-]?secret|api[_-]?key|"
+    r"private[_-]?key|authorization|auth|secret|password|token|"
     r"mnemonic|seed|passphrase)"
 )
 _SECRET_PATTERNS = (
     re.compile(
-        rf"""(?ix)(?P<prefix>["']?{_SECRET_KEY}["']?\s*[:=]\s*)"""
-        rf"""(?P<quote>["'])(?P<value>.*?)(?P=quote)"""
+        rf"""(?ix)(?P<prefix>["\']?{_SECRET_KEY}["\']?\s*[:=]\s*)"""
+        rf"""(?P<quote>["\'])(?P<value>.*?)(?P=quote)"""
     ),
     re.compile(
-        rf"""(?i)(?P<prefix>["']?{_SECRET_KEY}["']?\s*[:=]\s*)"""
-        r"""(?:(?:bearer|basic|token)\s+)?[^\s,;}]+"""
+        r"(?im)(?P<prefix>\b(?:mnemonic|seed|passphrase|password)\s*[:=]\s*)"
+        r"(?P<value>[^\r\n]+)"
     ),
-    re.compile(r"(?i)\b(?:bearer|basic|token)\s+[A-Za-z0-9._~+/=-]+"),
+    re.compile(
+        rf"""(?ix)(?P<prefix>["\']?{_SECRET_KEY}["\']?\s*[:=]\s*)"""
+        r"""(?P<value>[^\s,;}]+)"""
+    ),
+    re.compile(
+        r"(?i)(?P<prefix>\bAuthorization\s*:\s*)"
+        r"(?:(?:Bearer|Basic|Token)\s+)?[^\s,;]+"
+    ),
+    re.compile(r"(?i)(?P<prefix>\bBearer\s+)[A-Za-z0-9._~+/=-]+"),
     re.compile(r"(?i)\b(?:0x)?[a-f0-9]{64}\b"),
 )
 
@@ -51,9 +61,11 @@ def configure_logging(
     """Configure a handler with secret redaction enabled."""
     target = logger or logging.getLogger()
     configured_handler = handler or logging.StreamHandler()
-    configured_handler.addFilter(RedactingFilter())
+    if not any(isinstance(item, RedactingFilter) for item in configured_handler.filters):
+        configured_handler.addFilter(RedactingFilter())
     target.setLevel(level)
-    target.addHandler(configured_handler)
+    if configured_handler not in target.handlers:
+        target.addHandler(configured_handler)
     return configured_handler
 
 
