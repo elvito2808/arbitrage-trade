@@ -132,3 +132,30 @@ def test_configure_logging_attaches_redaction_filter():
     assert configured is handler
     assert any(isinstance(item, RedactingFilter) for item in handler.filters)
     logger.removeHandler(handler)
+
+
+def test_formatter_never_emits_any_supported_secret_sample():
+    import io
+
+    samples = [
+        ('Authorization: Basic dXNlcjpwYXNz', "dXNlcjpwYXNz"),
+        ("authorization=Token abc.def-123", "abc.def-123"),
+        ("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9", "eyJhbGciOiJIUzI1NiJ9"),
+        ('{"api_key": "value with spaces"}', "value with spaces"),
+        ('{"private_key": "private phrase with spaces"}', "private phrase with spaces"),
+        ('{"mnemonic": "twelve secret words here"}', "twelve secret words here"),
+        ('{"seed": "seed material"}', "seed material"),
+        ('{"passphrase": "a phrase with spaces"}', "a phrase with spaces"),
+    ]
+    logger = logging.getLogger("test.redaction.all-formats")
+    logger.handlers.clear()
+    logger.propagate = False
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    configure_logging(handler=handler, logger=logger)
+    for sample, _ in samples:
+        logger.error("%s", sample)
+    output = stream.getvalue()
+    for _, secret in samples:
+        assert secret not in output
+    logger.removeHandler(handler)
